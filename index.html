@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B2545">
+<title>N2880L</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+       font-family:Roboto,Arial,sans-serif;color:#fff;background:linear-gradient(180deg,#12345F,#5F96CC)}
+  h1{margin:0 0 8px;font-size:26px} p{margin:4px 16px;text-align:center;opacity:.9}
+  a{color:#EEB902;font-weight:700}
+</style>
+</head>
+<body>
+  <h1>✈ N2880L</h1>
+  <p id="msg">Getting your GPS position…</p>
+  <p><a id="skip" href="#">Open without GPS</a></p>
+<script>
+/* ===== Paste your app's Web app URL (it ends in /exec) between the quotes ===== */
+var APP_URL = 'https://script.google.com/macros/s/AKfycbwCneDTvq4E6MiLiPfb7k3KLfy3skQWfuQyhrqo_1WneCV89SixgPy3q0mk8mDnhRU/exec';
+/* ============================================================================= */
+function go(q) { location.replace(APP_URL + (q ? (APP_URL.indexOf('?') >= 0 ? '&' : '?') + q : '')); }
+document.getElementById('skip').onclick = function (e) { e.preventDefault(); go(''); };
+var done = false;
+function finish(q) { if (done) return; done = true; go(q); }
+if (APP_URL.indexOf('/exec') < 0) {
+  document.getElementById('msg').textContent = 'Setup needed: paste your app link into this page (APP_URL).';
+} else if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(function (p) {
+    finish('lat=' + p.coords.latitude.toFixed(5) + '&lon=' + p.coords.longitude.toFixed(5) + '&t=' + Date.now());
+  }, function () {
+    document.getElementById('msg').textContent = 'GPS not allowed. Opening without it…'; setTimeout(function () { finish(''); }, 1200);
+  }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+  setTimeout(function () { finish(''); }, 15000);
+} else { finish(''); }
+</script>
+</body>
+</html>
