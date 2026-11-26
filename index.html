@@ -1,29 +1,74 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0B2545">
-<title>N2880L</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1116">
+<title>FlightDeck IQ</title>
+<link rel="icon" href="icon.png">
 <style>
-  body{margin:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
-       font-family:Roboto,Arial,sans-serif;color:#fff;background:linear-gradient(180deg,#12345F,#5F96CC)}
-  h1{margin:0 0 8px;font-size:26px} p{margin:4px 16px;text-align:center;opacity:.9}
-  a{color:#EEB902;font-weight:700}
+  html,body{margin:0;height:100%;background:#0E1116;color:#E9ECF1;font-family:-apple-system,"SF Pro Text",Roboto,Arial,sans-serif;overflow:hidden}
+  canvas{position:fixed;inset:0;width:100%;height:100%}
+  .center{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+  .logo{width:68px;height:68px;border-radius:18px;background:linear-gradient(135deg,#2F8CFF,#1C4FA8);display:flex;align-items:center;justify-content:center;font-size:34px;color:#fff;box-shadow:0 4px 24px rgba(47,140,255,.5);margin-bottom:18px}
+  h1{margin:0;font-size:38px;font-weight:800;letter-spacing:.5px;text-shadow:0 2px 16px rgba(0,0,0,.8)}
+  h1 span{color:#2F8CFF}
+  .tail{margin-top:6px;font-size:14px;color:#97A0AF;letter-spacing:3px;text-transform:uppercase}
+  .msg{margin-top:34px;font-size:15px;color:#C5CDD8;min-height:20px;text-shadow:0 1px 6px #000}
+  .dots:after{content:'';animation:d 1.4s steps(4) infinite}
+  @keyframes d{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}}
+  a{display:inline-block;margin-top:18px;color:#E9ECF1;text-decoration:none;font-weight:700;font-size:14px;border:1px solid #3A4352;background:rgba(26,31,40,.85);border-radius:10px;padding:10px 16px}
 </style>
 </head>
 <body>
-  <h1>✈ N2880L</h1>
-  <p id="msg">Getting your GPS position…</p>
-  <p><a id="skip" href="#">Open without GPS</a></p>
+<canvas id="radar"></canvas>
+<div class="center">
+  <div class="logo">✈</div>
+  <h1>FlightDeck <span>IQ</span></h1>
+  <div class="tail">N2880L · Dakota</div>
+  <div class="msg" id="msg"><span class="dots">Getting your GPS position</span></div>
+  <a id="skip" href="#">Open without GPS</a>
+</div>
 <script>
 /* ===== Paste your app's Web app URL (it ends in /exec) between the quotes ===== */
-var APP_URL = 'https://script.google.com/macros/s/AKfycbwCneDTvq4E6MiLiPfb7k3KLfy3skQWfuQyhrqo_1WneCV89SixgPy3q0mk8mDnhRU/exec';
+var APP_URL = 'https://script.google.com/macros/s/AKfycbyJV6O_mLXwnEZ2YC1uu_8Vovr-rS0yNrZpl33w_ur4DFXf9L95PRAqZWju2grg6l6p/exec';
 /* ============================================================================= */
+
+// radar scope background: range rings, compass ticks, a rotating sweep and fading blips
+(function () {
+  var c = document.getElementById('radar'), x = c.getContext('2d'), W, H, R, cx, cy, ang = 0, dpr = window.devicePixelRatio || 1;
+  var blips = []; for (var i = 0; i < 9; i++) blips.push({ a: Math.random() * Math.PI * 2, r: 0.25 + Math.random() * 0.7, seen: -10 });
+  function size() { W = innerWidth; H = innerHeight; c.width = W * dpr; c.height = H * dpr; x.setTransform(dpr, 0, 0, dpr, 0, 0); cx = W / 2; cy = H / 2; R = Math.hypot(W, H) / 2; }
+  size(); addEventListener('resize', size);
+  function frame(t) {
+    x.fillStyle = 'rgba(8,14,20,0.22)'; x.fillRect(0, 0, W, H);
+    var ring = Math.min(W, H) / 2 * 0.95;
+    x.strokeStyle = 'rgba(48,209,88,0.16)'; x.lineWidth = 1;
+    for (var k = 1; k <= 4; k++) { x.beginPath(); x.arc(cx, cy, ring * k / 4 * 1.35, 0, Math.PI * 2); x.stroke(); }
+    for (var d = 0; d < 360; d += 30) { var q = d * Math.PI / 180; x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + Math.cos(q) * R, cy + Math.sin(q) * R); x.stroke(); }
+    // sweep
+    ang = (t / 1000 * 1.2) % (Math.PI * 2);
+    var g = x.createRadialGradient(cx, cy, 0, cx, cy, R);
+    g.addColorStop(0, 'rgba(48,209,88,0.35)'); g.addColorStop(1, 'rgba(48,209,88,0.02)');
+    x.fillStyle = g; x.beginPath(); x.moveTo(cx, cy); x.arc(cx, cy, R, ang - 0.35, ang); x.closePath(); x.fill();
+    x.strokeStyle = 'rgba(48,209,88,0.8)'; x.lineWidth = 2; x.beginPath(); x.moveTo(cx, cy); x.lineTo(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R); x.stroke();
+    // blips light up as the sweep passes
+    blips.forEach(function (b) {
+      var diff = (ang - b.a + Math.PI * 4) % (Math.PI * 2);
+      if (diff < 0.05) b.seen = t;
+      var age = (t - b.seen) / 2500;
+      if (age >= 0 && age < 1) { x.fillStyle = 'rgba(120,255,150,' + (1 - age) + ')'; x.beginPath(); x.arc(cx + Math.cos(b.a) * b.r * ring * 1.3, cy + Math.sin(b.a) * b.r * ring * 1.3, 3.5, 0, Math.PI * 2); x.fill(); }
+      b.a += 0.0004;
+    });
+    requestAnimationFrame(frame);
+  }
+  x.fillStyle = '#080E14'; x.fillRect(0, 0, W, H); requestAnimationFrame(frame);
+})();
+
 function go(q) { location.replace(APP_URL + (q ? (APP_URL.indexOf('?') >= 0 ? '&' : '?') + q : '')); }
 document.getElementById('skip').onclick = function (e) { e.preventDefault(); go(''); };
 var done = false;
-function finish(q) { if (done) return; done = true; go(q); }
+function finish(q) { if (done) return; done = true; document.getElementById('msg').innerHTML = '<span class="dots">Opening FlightDeck IQ</span>'; setTimeout(function () { go(q); }, 400); }
 if (APP_URL.indexOf('/exec') < 0) {
   document.getElementById('msg').textContent = 'Setup needed: paste your app link into this page (APP_URL).';
 } else if (navigator.geolocation) {

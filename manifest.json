@@ -1,3 +1,3 @@
-{ "name": "N2880L Map", "short_name": "N2880L Map", "start_url": "map.html", "display": "standalone",
+{ "name": "FlightDeck IQ Map", "short_name": "FlightDeck Map", "start_url": "map.html", "display": "standalone",
   "background_color": "#0B2545", "theme_color": "#0B2545",
   "icons": [{ "src": "icon.png", "sizes": "512x512", "type": "image/png" }] }
