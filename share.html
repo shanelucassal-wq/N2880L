@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0E1116">
+<title>Follow N2880L · FlightDeck IQ</title>
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html,body{margin:0;height:100%;background:#0E1116;color:#E9ECF1;font-family:-apple-system,Roboto,Arial,sans-serif}
+  #map{position:absolute;inset:0}
+  .card{position:absolute;left:10px;right:10px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:1000;background:rgba(20,25,34,.95);border:1px solid #2B3240;border-radius:16px;padding:14px 16px;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+  .top{display:flex;justify-content:space-between;align-items:center}
+  .brand{font-size:12px;color:#97A0AF;letter-spacing:1px}.brand b{color:#E9ECF1}.brand b span{color:#2F8CFF}
+  .tail{font-size:22px;font-weight:800;margin-top:2px}
+  .badge{border-radius:20px;padding:5px 10px;font-size:12px;font-weight:800;letter-spacing:.5px}
+  .air{background:rgba(48,209,88,.18);color:#30D158}.ground{background:rgba(151,160,175,.18);color:#97A0AF}
+  .route{font-size:15px;margin-top:6px;color:#C5CDD8}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px;text-align:center}
+  .grid b{display:block;font-size:18px}.grid span{font-size:10px;color:#97A0AF;letter-spacing:.8px;text-transform:uppercase}
+  .eta b{color:#2F8CFF}
+  .fine{font-size:11px;color:#97A0AF;margin-top:10px}
+  .err{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:30px;font-size:16px;z-index:2000;background:#0E1116}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="card">
+  <div class="top"><div><div class="brand">FOLLOWING ON <b>FlightDeck <span>IQ</span></b></div><div class="tail">N2880L</div></div><div id="badge" class="badge ground">LOADING</div></div>
+  <div class="route" id="route"></div>
+  <div class="grid">
+    <div><b id="alt">—</b><span>Altitude ft</span></div>
+    <div><b id="gs">—</b><span>Speed kt</span></div>
+    <div><b id="togo">—</b><span>Miles to go</span></div>
+    <div class="eta"><b id="eta">—</b><span>Lands about</span></div>
+  </div>
+  <div class="fine" id="upd"></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+var hp = {}; location.hash.replace(/^#/, '').split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) hp[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+function $(id) { return document.getElementById(id); }
+var map = L.map('map', { zoomControl: false }).setView([38.8, -81.3], 8);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, attribution: 'Map: Esri' }).addTo(map);
+var plane = null, routeLine = null, fitted = false;
+function icon(rot) {
+  return L.divIcon({ className: '', iconSize: [48, 48], iconAnchor: [24, 24], html: '<svg width="48" height="48" viewBox="0 0 48 48" style="transform:rotate(' + (rot || 0) + 'deg);filter:drop-shadow(0 1px 3px rgba(0,0,0,.6))"><path d="M24 2 C26.5 2 27.5 5 27.5 9 L27.5 17 L45 26 L45 31 L27.5 26.5 L27 37 L33 41.5 L33 45 L24 42.5 L15 45 L15 41.5 L21 37 L20.5 26.5 L3 31 L3 26 L20.5 17 L20.5 9 C20.5 5 21.5 2 24 2 Z" fill="#2F8CFF" stroke="#fff" stroke-width="2"/></svg>' });
+}
+function nm(a, b) { var k = Math.PI / 180, x = (b[1] - a[1]) * Math.cos((a[0] + b[0]) / 2 * k); return Math.sqrt(x * x + Math.pow(b[0] - a[0], 2)) * 60; }
+function tm(ms) { return ms ? new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'; }
+function ago(ms) { var m = Math.round((Date.now() - ms) / 60000); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : Math.round(m / 60) + ' hr ago'; }
+function load() {
+  if (!hp.api || !hp.s) { document.body.insertAdjacentHTML('beforeend', '<div class="err">This link is incomplete. Ask Shane to send it again.</div>'); return; }
+  fetch(hp.api + '?api=track&s=' + hp.s).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.error) { document.body.insertAdjacentHTML('beforeend', '<div class="err">' + d.error + '</div>'); return; }
+    $('badge').textContent = d.airborne ? 'IN THE AIR' : 'ON THE GROUND'; $('badge').className = 'badge ' + (d.airborne ? 'air' : 'ground');
+    var r = d.route;
+    if (r && r.points) {
+      $('route').textContent = r.dep + ' → ' + r.dest + ' · planned departure ' + tm(r.depart);
+      var ll = r.points.map(function (p) { return [p.lat, p.lon]; });
+      if (!routeLine) routeLine = L.polyline(ll, { color: '#C000C0', weight: 4, opacity: .8, dashArray: '10 8' }).addTo(map); else routeLine.setLatLngs(ll);
+    } else $('route').textContent = 'No trip planned right now';
+    if (d.pos && d.pos.lat != null) {
+      var here = [d.pos.lat, d.pos.lon];
+      if (!plane) plane = L.marker(here, { icon: icon(d.pos.track) }).addTo(map); else { plane.setLatLng(here); plane.setIcon(icon(d.pos.track)); }
+      $('alt').textContent = d.airborne && d.pos.alt ? Number(d.pos.alt).toLocaleString() : '—';
+      $('gs').textContent = d.airborne && d.pos.gs ? Math.round(d.pos.gs) : '—';
+      if (r && r.points && d.airborne) {
+        var dest = r.points[r.points.length - 1], togo = nm(here, [dest.lat, dest.lon]);
+        $('togo').textContent = Math.round(togo);
+        $('eta').textContent = d.pos.gs > 40 ? tm(Date.now() + togo / d.pos.gs * 3600000) : tm(r.eta);
+      } else { $('togo').textContent = '—'; $('eta').textContent = r ? tm(r.eta) : '—'; }
+      $('upd').textContent = (d.airborne ? 'Position ' : 'Last seen ') + ago(d.pos.t) + '. Updates every 20 seconds. Tracking from public ADS-B receivers can drop out at low altitude.';
+      if (!fitted) { fitted = true; if (routeLine) map.fitBounds(routeLine.getBounds().extend(here), { padding: [40, 40], paddingBottomRight: [40, 200] }); else map.setView(here, 9); }
+      else if (d.airborne) map.panTo(here);
+    } else if (!fitted && routeLine) { fitted = true; map.fitBounds(routeLine.getBounds(), { padding: [40, 40] }); }
+  }).catch(function () { $('upd').textContent = 'Could not reach the tracker. Trying again…'; });
+}
+load(); setInterval(load, 20000);
+</script>
+</body>
+</html>
