@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0B2545">
+<title>N2880L Map</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  html,body{margin:0;height:100%;background:#0B2545;font-family:Roboto,Arial,sans-serif}
+  #map{position:absolute;inset:0;bottom:64px}
+  #bar{position:absolute;left:0;right:0;bottom:0;height:64px;background:#0B2545;color:#fff;display:flex;align-items:center;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom)}
+  .cell{text-align:center;min-width:56px}.cell b{display:block;font-size:19px}.cell span{font-size:10px;opacity:.75;letter-spacing:.5px}
+  #btns{position:absolute;right:10px;top:calc(10px + env(safe-area-inset-top));display:flex;flex-direction:column;gap:8px;z-index:1000}
+  #btns button{border:0;border-radius:10px;padding:10px 12px;font-weight:700;font-size:13px;background:rgba(255,255,255,.95);color:#0B2545;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+  #btns button.on{background:#EEB902}
+  #status{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;background:rgba(11,37,69,.85);color:#fff;border-radius:10px;padding:6px 10px;font-size:12px;max-width:60%}
+  #panel{position:absolute;left:10px;right:10px;bottom:74px;z-index:1001;background:#fff;border-radius:14px;padding:14px;display:none;box-shadow:0 2px 10px rgba(0,0,0,.4);font-size:14px}
+  #panel h3{margin:0 0 8px;color:#0B2545}#panel button{border:0;border-radius:10px;padding:10px;margin:4px 4px 0 0;font-weight:700;background:#EEB902;color:#0B2545}
+  #panel .sec{background:#E5E7EB}
+  .bar{height:8px;background:#E5E7EB;border-radius:4px;overflow:hidden;margin:8px 0}.bar i{display:block;height:100%;background:#0B2545;width:0}
+  .tlabel{font:700 11px Arial;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
+  .wlabel{font:700 12px Arial;color:#C000C0;text-shadow:0 0 3px #fff,0 0 3px #fff;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="status">Starting…</div>
+<div id="btns">
+  <button id="bFollow" class="on" onclick="toggleFollow()">Follow</button>
+  <button id="bTraffic" class="on" onclick="toggleTraffic()">Traffic</button>
+  <button id="bRadar" onclick="toggleRadar()">Radar</button>
+  <button onclick="showPanel()">Offline</button>
+</div>
+<div id="panel">
+  <h3>Offline charts</h3>
+  <div id="pInfo">Save sectional chart tiles on this phone so the map works with no signal.</div>
+  <div class="bar"><i id="pBar"></i></div>
+  <div id="pMsg" style="font-size:12px;color:#555"></div>
+  <button onclick="saveRoute()">Save charts for my route</button>
+  <button onclick="saveAround()">Save 60 nm around me</button>
+  <button class="sec" onclick="clearTiles()">Delete saved charts</button>
+  <button class="sec" onclick="hidePanel()">Close</button>
+</div>
+<div id="bar">
+  <div class="cell"><b id="vGs">--</b><span>GS KT</span></div>
+  <div class="cell"><b id="vTrk">---</b><span>TRK °T</span></div>
+  <div class="cell"><b id="vAlt">----</b><span>GPS ALT</span></div>
+  <div class="cell"><b id="vWp">----</b><span id="vWpLbl">NEXT</span></div>
+  <div class="cell"><b id="vDist">--</b><span>NM</span></div>
+  <div class="cell"><b id="vEte">--</b><span>ETE</span></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+/* ===== N2880L moving map. Sectionals: FAA; radar: Iowa Environmental Mesonet; traffic: adsb.lol via your N2880L script ===== */
+var OWN_HEX = 'a2ee16';
+var SECT = 'https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/VFR_Sectional/MapServer/tile/{z}/{y}/{x}';
+var RADAR = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png';
+var TILE_CACHE = 'n2880l-tiles-v1';
+function $(id) { return document.getElementById(id); }
+function store(k, v) { try { localStorage.setItem('n2880l_map_' + k, JSON.stringify(v)); } catch (e) {} }
+function recall(k, d) { try { var v = localStorage.getItem('n2880l_map_' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } }
+
+// settings handed over in the link: #api=...&t=...&r=ID:lat:lon,ID:lat:lon
+var hp = {}; location.hash.replace(/^#/, '').split('&').forEach(function (kv) { var i = kv.indexOf('='); if (i > 0) hp[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1)); });
+if (hp.api) store('api', hp.api); if (hp.t) store('t', hp.t);
+if (hp.r) store('route', { points: hp.r.split(',').map(function (s) { var p = s.split(':'); return { id: p[0], lat: +p[1], lon: +p[2] }; }), alt: +hp.alt || null, made: Date.now() });
+var API = recall('api', ''), TOKEN = recall('t', '');
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+
+var map = L.map('map', { zoomControl: false, attributionControl: true }).setView(recall('view', [38.82, -81.35]), recall('zoom', 9));
+L.tileLayer(SECT, { crossOrigin: true, maxNativeZoom: 12, maxZoom: 14, minZoom: 5, attribution: 'Sectional: FAA' }).addTo(map);
+var radar = L.tileLayer(RADAR, { opacity: 0.55, maxNativeZoom: 10, maxZoom: 14, attribution: 'Radar: IEM' });
+map.on('moveend', function () { store('view', [map.getCenter().lat, map.getCenter().lng]); store('zoom', map.getZoom()); });
+
+// ---------- route ----------
+var route = recall('route', null), routeLayer = L.layerGroup().addTo(map);
+function drawRoute() {
+  routeLayer.clearLayers(); if (!route || !route.points || route.points.length < 2) return;
+  var ll = route.points.map(function (p) { return [p.lat, p.lon]; });
+  L.polyline(ll, { color: '#C000C0', weight: 4, opacity: 0.85 }).addTo(routeLayer);
+  route.points.forEach(function (p) { L.circleMarker([p.lat, p.lon], { radius: 5, color: '#C000C0', fillColor: '#fff', fillOpacity: 1, weight: 2 }).addTo(routeLayer);
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'wlabel', html: p.id, iconAnchor: [-6, 18] }) }).addTo(routeLayer); });
+}
+function fetchRoute() {
+  if (!API || !TOKEN || !navigator.onLine) return;
+  fetch(API + '?api=route&t=' + TOKEN).then(function (r) { return r.json(); }).then(function (r) {
+    if (r && r.points && (!route || !route.made || r.made >= route.made)) { route = r; store('route', r); drawRoute(); }
+  }).catch(function () {});
+}
+drawRoute(); fetchRoute();
+if (route && route.points && !recall('view', null)) map.fitBounds(route.points.map(function (p) { return [p.lat, p.lon]; }), { padding: [30, 30] });
+
+// ---------- ownship ----------
+var follow = true, me = null, meMarker = null, lastFix = null;
+function planeIcon(rot, color) {
+  return L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17],
+    html: '<svg width="34" height="34" viewBox="0 0 34 34" style="transform:rotate(' + rot + 'deg)"><path d="M17 2 L20 14 L31 19 L31 22 L20 19 L19 28 L23 31 L23 33 L17 31.5 L11 33 L11 31 L15 28 L14 19 L3 22 L3 19 L14 14 Z" fill="' + color + '" stroke="#fff" stroke-width="1.5"/></svg>' });
+}
+function nmBetween(a, b) { var k = Math.PI / 180, x = (b[1] - a[1]) * Math.cos((a[0] + b[0]) / 2 * k); return Math.sqrt(x * x + Math.pow(b[0] - a[0], 2)) * 60; }
+function brg(a, b) { var k = Math.PI / 180, y = Math.sin((b[1] - a[1]) * k) * Math.cos(b[0] * k), x = Math.cos(a[0] * k) * Math.sin(b[0] * k) - Math.sin(a[0] * k) * Math.cos(b[0] * k) * Math.cos((b[1] - a[1]) * k); return (Math.atan2(y, x) / k + 360) % 360; }
+function onFix(pos) {
+  var c = pos.coords, now = [c.latitude, c.longitude];
+  var gs = c.speed != null ? c.speed * 1.94384 : (lastFix ? nmBetween(lastFix.p, now) / ((pos.timestamp - lastFix.t) / 3600000) : 0);
+  var trk = c.heading != null && !isNaN(c.heading) && gs > 5 ? c.heading : (lastFix && nmBetween(lastFix.p, now) > 0.02 ? brg(lastFix.p, now) : (me ? me.trk : 0));
+  me = { lat: now[0], lon: now[1], gs: gs, trk: trk, alt: c.altitude != null ? c.altitude * 3.28084 : null, t: pos.timestamp };
+  lastFix = { p: now, t: pos.timestamp };
+  if (!meMarker) meMarker = L.marker(now, { icon: planeIcon(trk, '#0B2545'), zIndexOffset: 1000 }).addTo(map);
+  else { meMarker.setLatLng(now); meMarker.setIcon(planeIcon(trk, '#0B2545')); }
+  if (follow) map.panTo(now, { animate: true });
+  $('vGs').textContent = Math.round(gs); $('vTrk').textContent = ('00' + Math.round(trk)).slice(-3);
+  $('vAlt').textContent = me.alt == null ? '----' : Math.round(me.alt / 10) * 10;
+  updateNext(); setStatus();
+}
+function updateNext() {
+  if (!me || !route || !route.points || route.points.length < 2) return;
+  var P = route.points.map(function (p) { return [p.lat, p.lon]; }), here = [me.lat, me.lon];
+  // next waypoint: the end of the leg we are closest to
+  var best = 1, bd = 1e9;
+  for (var i = 1; i < P.length; i++) { var d = nmBetween(here, P[i]) + nmBetween(P[i - 1], here) - nmBetween(P[i - 1], P[i]); if (d < bd) { bd = d; best = i; } }
+  var nx = route.points[best], dist = nmBetween(here, P[best]);
+  $('vWp').textContent = nx.id; $('vWpLbl').textContent = 'NEXT ' + ('00' + Math.round(brg(here, P[best]))).slice(-3) + '°';
+  $('vDist').textContent = dist < 10 ? dist.toFixed(1) : Math.round(dist);
+  var ete = me.gs > 20 ? dist / me.gs * 60 : null;
+  $('vEte').textContent = ete == null ? '--' : (ete >= 60 ? Math.floor(ete / 60) + ':' + ('0' + Math.round(ete % 60)).slice(-2) : Math.round(ete) + 'm');
+}
+if (navigator.geolocation) navigator.geolocation.watchPosition(onFix, function (e) { setStatus('GPS: ' + e.message); }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+function toggleFollow() { follow = !follow; $('bFollow').classList.toggle('on', follow); if (follow && me) map.panTo([me.lat, me.lon]); }
+map.on('dragstart', function () { if (follow) toggleFollow(); });
+function wake() { try { if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(function () {}); } catch (e) {} }
+wake(); document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') wake(); });
+
+// ---------- traffic (internet only) ----------
+var trafficOn = true, trafLayer = L.layerGroup().addTo(map), trafTime = 0, trafErr = '';
+function toggleTraffic() { trafficOn = !trafficOn; $('bTraffic').classList.toggle('on', trafficOn); if (!trafficOn) trafLayer.clearLayers(); else pollTraffic(); }
+function pollTraffic() {
+  if (!trafficOn || !me || !API || !TOKEN || !navigator.onLine) { setStatus(); return; }
+  fetch(API + '?api=traffic&t=' + TOKEN + '&lat=' + me.lat.toFixed(3) + '&lon=' + me.lon.toFixed(3) + '&r=25').then(function (r) { return r.json(); }).then(function (d) {
+    if (d.error) { trafErr = d.error; setStatus(); return; }
+    trafErr = ''; trafTime = Date.now(); trafLayer.clearLayers();
+    (d.ac || []).forEach(function (a) {
+      if (String(a.hex).toLowerCase() === OWN_HEX) return;
+      var rel = (a.alt != null && me.alt != null) ? Math.round((a.alt - me.alt) / 100) : null;
+      var dist = nmBetween([me.lat, me.lon], [a.lat, a.lon]);
+      var color = rel != null && Math.abs(rel) <= 10 && dist < 5 ? '#D00000' : (rel != null && Math.abs(rel) <= 30 ? '#E89B00' : '#00A0E0');
+      L.marker([a.lat, a.lon], { icon: planeIcon(a.trk || 0, color), zIndexOffset: 500 }).addTo(trafLayer);
+      var lbl = (rel == null ? '' : (rel >= 0 ? '+' : '') + ('0' + Math.abs(rel)).slice(-2) + (a.vs > 300 ? '↑' : a.vs < -300 ? '↓' : '') + ' ') + (a.cs || '');
+      L.marker([a.lat, a.lon], { icon: L.divIcon({ className: 'tlabel', html: lbl, iconAnchor: [-14, 6] }) }).addTo(trafLayer);
+    });
+    setStatus();
+  }).catch(function () { trafErr = 'no connection'; setStatus(); });
+}
+setInterval(pollTraffic, 8000);
+setInterval(function () { if (trafficOn && trafTime && Date.now() - trafTime > 45000) { trafLayer.eachLayer(function (l) { if (l.setOpacity) l.setOpacity(0.35); }); } }, 5000);
+
+// ---------- radar ----------
+var radarOn = false;
+function toggleRadar() { radarOn = !radarOn; $('bRadar').classList.toggle('on', radarOn); if (radarOn) radar.addTo(map); else map.removeLayer(radar); }
+setInterval(function () { if (radarOn && navigator.onLine) radar.setUrl(RADAR + '?t=' + Date.now()); }, 300000);
+
+function setStatus(msg) {
+  var s = [];
+  s.push(navigator.onLine ? 'Online' : 'OFFLINE: saved charts only');
+  if (trafficOn) s.push(!API ? 'Traffic: set up the public link' : trafErr ? 'Traffic: ' + trafErr : trafTime ? 'Traffic ' + Math.round((Date.now() - trafTime) / 1000) + ' s old' : 'Traffic: waiting');
+  if (!me) s.push('Waiting for GPS');
+  if (msg) s.push(msg);
+  $('status').textContent = s.join(' · ');
+}
+window.addEventListener('online', function () { setStatus(); fetchRoute(); }); window.addEventListener('offline', function () { setStatus(); });
+setStatus();
+
+// ---------- offline chart tiles ----------
+function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
+function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z)); }
+function tilesAround(pts, radiusNm, zmin, zmax) {
+  var set = {};
+  pts.forEach(function (p) {
+    var dLat = radiusNm / 60, dLon = radiusNm / 60 / Math.cos(p[0] * Math.PI / 180);
+    for (var z = zmin; z <= zmax; z++) {
+      for (var x = lon2x(p[1] - dLon, z); x <= lon2x(p[1] + dLon, z); x++)
+        for (var y = lat2y(p[0] + dLat, z); y <= lat2y(p[0] - dLat, z); y++) set[z + '/' + y + '/' + x] = 1;
+    }
+  });
+  return Object.keys(set).map(function (k) { return SECT.replace('{z}/{y}/{x}', k); });
+}
+function routeSamples() {
+  if (!route || !route.points || route.points.length < 2) return [];
+  var out = [];
+  for (var i = 1; i < route.points.length; i++) {
+    var a = route.points[i - 1], b = route.points[i], n = Math.max(1, Math.ceil(nmBetween([a.lat, a.lon], [b.lat, b.lon]) / 5));
+    for (var j = 0; j <= n; j++) out.push([a.lat + (b.lat - a.lat) * j / n, a.lon + (b.lon - a.lon) * j / n]);
+  }
+  return out;
+}
+var saving = false;
+function saveTiles(urls, label) {
+  if (saving) return; saving = true;
+  $('pMsg').textContent = label + ': ' + urls.length + ' tiles to check…';
+  caches.open(TILE_CACHE).then(function (cache) {
+    var i = 0, got = 0, done = 0;
+    function next() {
+      if (i >= urls.length) return;
+      var u = urls[i++];
+      cache.match(u).then(function (hit) {
+        if (hit) return;
+        return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return cache.put(u, r); });
+      }).catch(function () {}).then(function () {
+        done++; $('pBar').style.width = Math.round(done / urls.length * 100) + '%';
+        $('pMsg').textContent = label + ': ' + done + ' of ' + urls.length + ' tiles (' + got + ' downloaded)';
+        if (done === urls.length) { saving = false; estimate(label + ' saved: ' + urls.length + ' tiles. '); } else next();
+      });
+    }
+    for (var k = 0; k < 6; k++) next();
+  });
+}
+function saveRoute() { var pts = routeSamples(); if (!pts.length) { $('pMsg').textContent = 'No route yet: plan a flight in the app first.'; return; } saveTiles(tilesAround(pts, 15, 6, 12), 'Route corridor'); }
+function saveAround() { if (!me) { $('pMsg').textContent = 'Waiting for GPS.'; return; } saveTiles(tilesAround([[me.lat, me.lon]], 60, 6, 11), 'Area around you'); }
+function clearTiles() { caches.delete(TILE_CACHE).then(function () { estimate('Saved charts deleted. '); }); }
+function estimate(prefix) { if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { $('pMsg').textContent = (prefix || '') + 'Using about ' + Math.round(e.usage / 1048576) + ' MB on this phone.'; }); }
+function showPanel() { $('panel').style.display = 'block'; estimate(); }
+function hidePanel() { $('panel').style.display = 'none'; }
+</script>
+</body>
+</html>
