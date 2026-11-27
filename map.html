@@ -23,7 +23,7 @@
   #editbar button.go{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
   #back{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;border:1px solid #3A4352;border-radius:10px;padding:9px 12px;font-weight:700;font-size:13px;background:rgba(26,31,40,.95);color:#E9ECF1;text-decoration:none}
   .alab{font:700 11px Arial;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000;white-space:nowrap}
-  .alab.vor{color:#7FB2FF}.alab.fix{color:#4DF2FF;font-weight:800;font-size:12px;letter-spacing:.3px;text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 2px #000;background:rgba(0,0,0,.45);border-radius:4px;padding:0 3px}.alab.apt{color:#FF7AFF}
+  .alab.vor{color:#7FB2FF}.alab.fix{color:#FF66E8;font-weight:800;font-size:12px;letter-spacing:.3px;text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 2px #000;background:rgba(0,0,0,.45);border-radius:4px;padding:0 3px}.alab.apt{color:#FF7AFF}
   .addbtn{margin-top:8px;border:0;border-radius:8px;padding:8px 10px;font-weight:700;background:#C000C0;color:#fff;width:100%}
   .glabel{font:700 12px Arial;color:#30D158;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
   #map{position:absolute;inset:0;bottom:64px}
@@ -54,20 +54,23 @@
 </div>
 <div id="btns">
   <button id="bDto" style="background:rgba(212,160,0,.9);border-color:#FFD60A;color:#111" onclick="promptDto()">D→</button>
-  <button id="bEdit" onclick="toggleEdit()">Edit route</button>
-  <button id="bFollow" class="on" onclick="toggleFollow()">Follow</button>
-  <button id="bTraffic" class="on" onclick="toggleTraffic()">Traffic</button>
-  <button id="bRadar" onclick="toggleRadar()">Radar</button>
-  <button id="bBase" onclick="toggleBaseMenu()">Map: Chart</button>
-  <div id="baseMenu" style="display:none;flex-direction:column;gap:6px;background:rgba(14,17,22,.96);border:1px solid #3A4352;border-radius:12px;padding:6px">
-    <button id="bmChart" onclick="setBase('Chart')">Sectional</button>
-    <button id="bmSatellite" onclick="setBase('Satellite')">Satellite</button>
-    <button id="bmStreets" onclick="setBase('Streets')">Streets</button>
-    <button id="bmAero" onclick="toggleAero()">Aero overlay</button>
-  </div>
-  <button id="bGlide" onclick="toggleGlide()">Glide</button>
-  <button onclick="showPanel()">Offline</button>
   <button style="background:rgba(255,69,58,.85);border-color:#FF453A;color:#fff" onclick="showEm()">EMERG</button>
+  <button id="bHide" onclick="toggleBtns()">Hide ▴</button>
+  <div id="optBtns" style="display:flex;flex-direction:column;gap:8px">
+    <button id="bEdit" onclick="toggleEdit()">Edit route</button>
+    <button id="bFollow" class="on" onclick="toggleFollow()">Follow</button>
+    <button id="bTraffic" class="on" onclick="toggleTraffic()">Traffic</button>
+    <button id="bRadar" onclick="toggleRadar()">Radar</button>
+    <button id="bBase" onclick="toggleBaseMenu()">Map: Chart</button>
+    <div id="baseMenu" style="display:none;flex-direction:column;gap:6px;background:rgba(14,17,22,.96);border:1px solid #3A4352;border-radius:12px;padding:6px">
+      <button id="bmChart" onclick="setBase('Chart')">Sectional</button>
+      <button id="bmSatellite" onclick="setBase('Satellite')">Satellite</button>
+      <button id="bmStreets" onclick="setBase('Streets')">Streets</button>
+      <button id="bmAero" onclick="toggleAero()">Aero overlay</button>
+    </div>
+    <button id="bGlide" onclick="toggleGlide()">Glide</button>
+    <button onclick="showPanel()">Offline</button>
+  </div>
 </div>
 <div id="panel">
   <h3>Offline charts</h3>
@@ -261,7 +264,7 @@ function drawAero() {
     // GPS fix: large, filled, outlined triangle that stands out on charts, satellite and streets (bigger tap target too)
     var fs = z >= 11 ? 18 : z >= 10 ? 16 : 13;
     L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [fs + 12, fs + 12], iconAnchor: [(fs + 12) / 2, (fs + 12) / 2],
-      html: '<svg width="' + (fs + 12) + '" height="' + (fs + 12) + '" viewBox="-6 -6 ' + (fs + 12) + ' ' + (fs + 12) + '"><polygon points="' + (fs / 2) + ',0 ' + fs + ',' + (fs * 0.87) + ' 0,' + (fs * 0.87) + '" fill="#4DF2FF" stroke="#000" stroke-width="2.2" stroke-linejoin="round"/><circle cx="' + (fs / 2) + '" cy="' + (fs * 0.58) + '" r="1.6" fill="#000"/></svg>' }) })
+      html: '<svg width="' + (fs + 12) + '" height="' + (fs + 12) + '" viewBox="-6 -6 ' + (fs + 12) + ' ' + (fs + 12) + '"><polygon points="' + (fs / 2) + ',0 ' + fs + ',' + (fs * 0.87) + ' 0,' + (fs * 0.87) + '" fill="#FF2BD6" stroke="#000" stroke-width="2.2" stroke-linejoin="round"/><circle cx="' + (fs / 2) + '" cy="' + (fs * 0.58) + '" r="1.6" fill="#000"/></svg>' }) })
 .addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], p.IDENT, c[1], c[0], 'FIX', '(GPS fix)');
     L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab fix', html: p.IDENT, iconAnchor: [-(fs / 2 + 4), 7] }) }).addTo(aeroLayer);
   });
@@ -567,6 +570,12 @@ function emShow(i) {
 
 if (dto) { $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + dto.id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>'; }
 
+// ---------- hide or show the extra buttons (Direct to, Emergency and Plan always stay) ----------
+var btnsHidden = recall('btnsHidden', false);
+function applyBtns() { $('optBtns').style.display = btnsHidden ? 'none' : 'flex'; $('bHide').textContent = btnsHidden ? 'More ▾' : 'Hide ▴'; }
+function toggleBtns() { btnsHidden = !btnsHidden; store('btnsHidden', btnsHidden); if (btnsHidden) $('baseMenu').style.display = 'none'; applyBtns(); }
+applyBtns();
+
 // ---------- offline chart tiles ----------
 function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
 function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z)); }
@@ -599,7 +608,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v12') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v13') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
