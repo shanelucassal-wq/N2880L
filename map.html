@@ -45,6 +45,7 @@
 <div id="map"></div>
 <div id="status">Starting…</div>
 <a id="back" href="index.html?tab=plan">‹ Plan</a>
+<div id="dtoChip" onclick="cancelDto()" style="display:none;position:absolute;left:50%;transform:translateX(-50%);top:calc(10px + env(safe-area-inset-top));z-index:1001;background:#D4A000;color:#111;font-weight:700;font-size:13px;border-radius:18px;padding:8px 14px;box-shadow:0 2px 8px rgba(0,0,0,.5);white-space:nowrap"></div>
 <div id="editbar">
   <div><b style="color:#E070E0">Editing route</b> · <span id="edInfo"></span></div>
   <div style="font-size:12px;color:#97A0AF;margin-top:4px">Double tap or press and hold the map to add a point. Drag points to move them; drag a ＋ to bend a leg. Tap a point to remove it.</div>
@@ -52,6 +53,7 @@
   <div class="row"><button onclick="doneEdit()">Done</button><button class="go" onclick="replan()">Re-plan in app</button></div>
 </div>
 <div id="btns">
+  <button id="bDto" style="background:rgba(212,160,0,.9);border-color:#FFD60A;color:#111" onclick="promptDto()">D→</button>
   <button id="bEdit" onclick="toggleEdit()">Edit route</button>
   <button id="bFollow" class="on" onclick="toggleFollow()">Follow</button>
   <button id="bTraffic" class="on" onclick="toggleTraffic()">Traffic</button>
@@ -111,6 +113,7 @@ var hp = {}; location.hash.replace(/^#/, '').split('&').forEach(function (kv) { 
 if (hp.api) store('api', hp.api); if (hp.t) store('t', hp.t);
 if (hp.r) store('route', { points: hp.r.split(',').map(function (s) { var p = s.split(':'); return { id: p[0], lat: +p[1], lon: +p[2] }; }), alt: +hp.alt || null, made: Date.now() });
 var API = recall('api', ''), TOKEN = recall('t', '');
+var BACK = hp.back || 'index.html'; if (hp.back) $('back').href = BACK + '?tab=plan';
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
@@ -220,7 +223,11 @@ function refreshAero() {
   drawAero();
 }
 function altTxt(v, d) { if (v == null || v === '' || v === -9998) return d === 'AA' ? 'top' : 'SFC'; var n = Number(v); return isNaN(n) ? String(v) : (n === 0 ? 'SFC' : n >= 18000 && n < 100000 ? 'FL' + Math.round(n / 100) : n.toLocaleString()); }
+var aeroPending = false;
+map.on('popupclose', function () { if (aeroPending) { aeroPending = false; setTimeout(drawAero, 50); } });
 function drawAero() {
+  // don't redraw under an open popup (it would close it); redraw when it closes
+  if (map._popup && map._popup.isOpen && map._popup.isOpen() && map._popup._source && aeroLayer.hasLayer(map._popup._source)) { aeroPending = true; return; }
   aeroLayer.clearLayers(); if (!aeroShowing()) return;
   var z = map.getZoom(), vb = map.getBounds().pad(0.2);
   var ASP = { B: { color: '#4C8DFF', weight: 2.5 }, C: { color: '#E060E0', weight: 2.5 }, D: { color: '#4C8DFF', weight: 2, dashArray: '8 6' }, E: { color: '#E060E0', weight: 1.5, dashArray: '6 6' } };
@@ -239,20 +246,20 @@ function drawAero() {
       var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
       var vor = /VOR|TAC/.test(p.CLASS_TXT || '');
       L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: vor ? '<svg width="18" height="18" viewBox="0 0 18 18"><polygon points="5,2 13,2 17,9 13,16 5,16 1,9" fill="none" stroke="#7FB2FF" stroke-width="2"/><circle cx="9" cy="9" r="1.8" fill="#7FB2FF"/></svg>' : '<svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="#C77DFF" stroke-width="2" stroke-dasharray="2 2"/></svg>' }) })
-        .bindPopup('<b>' + p.IDENT + '</b> ' + (p.NAME_TXT || '') + '<br>' + (p.CLASS_TXT || '') + '<br><button class="addbtn" onclick="addAeroPoint(\'' + p.IDENT + '\',' + c[1] + ',' + c[0] + ',\'NAV\')">+ Add to route</button>').addTo(aeroLayer);
+.addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], p.IDENT, c[1], c[0], 'NAV', (p.NAME_TXT || '') + '<br>' + (p.CLASS_TXT || ''));
       L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab vor', html: p.IDENT, iconAnchor: [-10, 6] }) }).addTo(aeroLayer);
     });
   }
   if (z >= 8) Object.values(aeroData.apt).forEach(function (f) {
     var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties, id = p.ICAO_ID || p.IDENT;
     L.circleMarker([c[1], c[0]], { pane: 'aeroPane', radius: 5, color: '#FF7AFF', weight: 2, fillColor: '#2A0A2A', fillOpacity: 0.9 })
-      .bindPopup('<b>' + id + '</b> ' + p.NAME + '<br>Elevation ' + p.ELEVATION + ' ft' + (p.IAPEXISTS ? '<br>Instrument approaches' : '') + '<br><button class="addbtn" onclick="addAeroPoint(\'' + id + '\',' + c[1] + ',' + c[0] + ',\'AIRPORT\')">+ Add to route</button>').addTo(aeroLayer);
+.addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], id, c[1], c[0], 'AIRPORT', p.NAME + '<br>Elevation ' + p.ELEVATION + ' ft' + (p.IAPEXISTS ? ', instrument approaches' : ''));
     L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab apt', html: id, iconAnchor: [-8, 6] }) }).addTo(aeroLayer);
   });
   if (z >= 9) Object.values(aeroData.fix).forEach(function (f) {
     var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
     L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5], html: '<svg width="10" height="10"><polygon points="5,1 9,9 1,9" fill="none" stroke="#E8E8E8" stroke-width="1.5"/></svg>' }) })
-      .bindPopup('<b>' + p.IDENT + '</b> (GPS fix)' + '<br><button class="addbtn" onclick="addAeroPoint(\'' + p.IDENT + '\',' + c[1] + ',' + c[0] + ',\'FIX\')">+ Add to route</button>').addTo(aeroLayer);
+.addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], p.IDENT, c[1], c[0], 'FIX', '(GPS fix)');
     if (z >= 10) L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab fix', html: p.IDENT, iconAnchor: [-6, 5] }) }).addTo(aeroLayer);
   });
 }
@@ -273,6 +280,7 @@ function drawRoute() {
     var mk = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: '<div class="wpdot ' + cls + (editing ? ' edit' : '') + '"></div>', iconSize: editing ? [24, 24] : [16, 16], iconAnchor: editing ? [12, 12] : [8, 8] }),
       draggable: editing && i > 0 && i < n - 1, zIndexOffset: 600 }).addTo(routeLayer);
     L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: '<span class="wpl ' + cls + '">' + ptLabel(p, i, n) + '</span>', iconAnchor: [-12, 26] }), interactive: false, zIndexOffset: 550 }).addTo(routeLayer);
+    if (!editing) bindPoint(mk, p.id, p.lat, p.lon, (p.type === 'AIRPORT' || /^K[A-Z0-9]{3}$|\d/.test(p.id)) && p.type !== 'LATLON' ? 'AIRPORT' : (p.type || 'FIX'), '');
     if (editing && i > 0 && i < n - 1) {
       mk.on('drag', function (e) { var q = e.target.getLatLng(); P[i].lat = q.lat; P[i].lon = q.lng; line.setLatLngs(P.map(function (p) { return [p.lat, p.lon]; })); });
       mk.on('dragstart', function () { pushHistory(); });
@@ -309,6 +317,72 @@ function clearWps() { if (route.points.length <= 2) return; if (!confirm('Remove
 function doneEdit() { if (editing) toggleEdit(); }
 
 // add a fix, navaid or airport from the overlay to the route (inserted where it adds the least distance)
+// popup body for a point: details, buttons, and (for airports) the frequency list
+function pointPopup(id, lat, lon, type, detail) {
+  var b = function (label, fn, color) { return '<button class="addbtn" style="background:' + color + '" onclick="' + fn + '">' + label + '</button>'; };
+  return '<div style="min-width:200px"><b style="font-size:14px">' + id + '</b> ' + (detail || '') +
+    b('→ Direct to ' + id, "directTo('" + id + "'," + lat + ',' + lon + ",'" + type + "')", '#D4A000') +
+    b('+ Add to route', "addAeroPoint('" + id + "'," + lat + ',' + lon + ",'" + type + "')", '#C000C0') +
+    (type === 'AIRPORT' ? '<div id="fq_' + id.replace(/[^A-Z0-9]/gi, '') + '" style="margin-top:8px;font-size:12px;color:#555">Loading frequencies…</div>' : '') + '</div>';
+}
+function bindPoint(marker, id, lat, lon, type, detail) {
+  marker.bindPopup(function () { return pointPopup(id, lat, lon, type, detail); }, { maxWidth: 280 });
+  if (type === 'AIRPORT') marker.on('popupopen', function () { loadFreqs(id); });
+}
+
+/* ---------- airport frequencies (FAA data through your public link; saved on the phone once seen) ---------- */
+var FQ_ORDER = { ATIS: 1, WX: 2, CD: 3, GND: 4, TWR: 5, CTAF: 6, UNICOM: 7, APP: 8, DEP: 9 };
+function showFreqs(id, list) {
+  var el = $('fq_' + id.replace(/[^A-Z0-9]/gi, '')); if (!el) return;
+  if (!list || !list.length) { el.innerHTML = 'No frequencies on file.'; return; }
+  el.innerHTML = '<table style="width:100%;border-collapse:collapse">' + list.slice().sort(function (a, b) { return (FQ_ORDER[a.kind] || 9) - (FQ_ORDER[b.kind] || 9); }).map(function (f) {
+    return '<tr><td style="padding:3px 4px 3px 0;color:#333">' + f.label + (f.sect && !/secondary/.test(f.sect) ? '<div style="font-size:10px;color:#888">' + f.sect + '</div>' : '') + '</td><td style="padding:3px 0;font-weight:800;font-size:14px;text-align:right;color:#0B2545;white-space:nowrap">' + f.freq + '</td></tr>'; }).join('') + '</table>';
+}
+function loadFreqs(id) {
+  var cached = recall('fq_' + id, null);
+  if (cached) showFreqs(id, cached);
+  if (!API || !TOKEN) { if (!cached) { var el = $('fq_' + id.replace(/[^A-Z0-9]/gi, '')); if (el) el.textContent = 'Frequencies need the public link (PUBLIC_API_URL).'; } return; }
+  if (!navigator.onLine) { if (!cached) { var el2 = $('fq_' + id.replace(/[^A-Z0-9]/gi, '')); if (el2) el2.textContent = 'Offline: frequencies not saved for this airport yet.'; } return; }
+  fetch(API + '?api=freqs&t=' + TOKEN + '&id=' + encodeURIComponent(id)).then(function (r) { return r.json(); }).then(function (d) {
+    if (d && d.list) { store('fq_' + id, d.list); showFreqs(id, d.list); }
+    else if (!cached) { var el3 = $('fq_' + id.replace(/[^A-Z0-9]/gi, '')); if (el3) el3.textContent = (d && d.error) || 'No frequencies found.'; }
+  }).catch(function () {});
+}
+
+/* ---------- Direct to ---------- */
+var dto = recall('dto', null), dtoLine = null;
+function directTo(id, lat, lon, type) {
+  map.closePopup();
+  dto = { id: id, lat: Number(lat), lon: Number(lon), type: type || '' }; store('dto', dto);
+  $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>';
+  drawDto(); updateNext();
+  if (type === 'AIRPORT') loadFreqs(id);
+  setStatus('Direct to ' + id);
+}
+function cancelDto() { dto = null; store('dto', null); $('dtoChip').style.display = 'none'; if (dtoLine) { map.removeLayer(dtoLine); dtoLine = null; } updateNext(); }
+function drawDto() {
+  if (!dto) return;
+  var from = me ? [me.lat, me.lon] : null;
+  if (!from) return;
+  if (!dtoLine) dtoLine = L.polyline([from, [dto.lat, dto.lon]], { color: '#FFD60A', weight: 4, dashArray: '10 6', opacity: 0.95, interactive: false }).addTo(map);
+  else dtoLine.setLatLngs([from, [dto.lat, dto.lon]]);
+}
+// "D→" button: type an identifier
+function promptDto() {
+  var id = (prompt('Direct to: airport, VOR or fix identifier') || '').trim().toUpperCase(); if (!id) return;
+  var hit = null;
+  (route && route.points || []).forEach(function (p) { if (!hit && p.id.toUpperCase() === id) hit = { lat: p.lat, lon: p.lon, type: /^[A-Z]{5}$/.test(id) ? 'FIX' : 'AIRPORT' }; });
+  ['apt', 'nav', 'fix'].forEach(function (k) { Object.values(aeroData[k]).forEach(function (f) { var q = f.properties || {}; if (!hit && (q.IDENT === id || q.ICAO_ID === id || 'K' + q.IDENT === id)) hit = { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], type: k === 'apt' ? 'AIRPORT' : k === 'nav' ? 'NAV' : 'FIX' }; }); });
+  if (hit) { directTo(id, hit.lat, hit.lon, hit.type); return; }
+  if (!navigator.onLine) { alert(id + ' is not in the saved data on this phone. With signal it can be looked up.'); return; }
+  setStatus('Looking up ' + id + '…');
+  var q = function (svc, where, type) { return fetch(FAA + svc + '/FeatureServer/0/query?where=' + encodeURIComponent(where) + '&outFields=IDENT&returnGeometry=true&outSR=4326&f=geojson').then(function (r) { return r.json(); }).then(function (g) { var f = (g.features || [])[0]; return f ? { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], type: type } : null; }).catch(function () { return null; }); };
+  var bare = id.length === 4 && id[0] === 'K' ? id.slice(1) : id;
+  q('US_Airport', "ICAO_ID='" + id + "' OR IDENT='" + bare + "'", 'AIRPORT').then(function (r) { return r || q('NAVAIDSystem', "IDENT='" + id + "'", 'NAV'); })
+    .then(function (r) { return r || q('DesignatedPoints', "IDENT='" + id + "'", 'FIX'); })
+    .then(function (r) { if (r) directTo(id, r.lat, r.lon, r.type); else alert('Could not find ' + id + '.'); });
+}
+
 function addAeroPoint(id, lat, lon, type) {
   map.closePopup();
   if (!route || !route.points || route.points.length < 2) { setStatus('Plan a flight in the app first, then add points here'); return; }
@@ -331,7 +405,7 @@ map.on('contextmenu', function (e) { addPointAt(e.latlng); });
 function appLink(withRoute) {
   var q = 'tab=plan';
   if (withRoute && route && route.points) q += '&plan=' + encodeURIComponent(route.points.map(function (p) { return p.id; }).join(' '));
-  return 'index.html?' + q;
+  return BACK + '?' + q;
 }
 function replan() { location.href = appLink(true); }
 $('back').onclick = function (e) { e.preventDefault(); location.href = appLink(route && route.edited && confirm('Re-plan with your edited route?')); };
@@ -399,6 +473,15 @@ function onFix(pos) {
   updateNext(); setStatus();
 }
 function updateNext() {
+  if (dto && me) {
+    var hereD = [me.lat, me.lon], dd = nmBetween(hereD, [dto.lat, dto.lon]);
+    drawDto();
+    $('vWp').textContent = dto.id; $('vWpLbl').textContent = 'D→ ' + ('00' + Math.round(brg(hereD, [dto.lat, dto.lon]))).slice(-3) + '°';
+    $('vDist').textContent = dd < 10 ? dd.toFixed(1) : Math.round(dd);
+    var et = me.gs > 20 ? dd / me.gs * 60 : null;
+    $('vEte').textContent = et == null ? '--' : (et >= 60 ? Math.floor(et / 60) + ':' + ('0' + Math.round(et % 60)).slice(-2) : Math.round(et) + 'm');
+    return;
+  }
   if (!me || !route || !route.points || route.points.length < 2) return;
   var P = route.points.map(function (p) { return [p.lat, p.lon]; }), here = [me.lat, me.lon];
   // next waypoint: the end of the leg we are closest to
@@ -431,7 +514,8 @@ function pollTraffic() {
       var dist = nmBetween([me.lat, me.lon], [a.lat, a.lon]);
       var color = rel != null && Math.abs(rel) <= 10 && dist < 5 ? '#D00000' : (rel != null && Math.abs(rel) <= 30 ? '#E89B00' : '#00A0E0');
       L.marker([a.lat, a.lon], { icon: planeIcon(a.trk || 0, color), zIndexOffset: 500 }).addTo(trafLayer);
-      var lbl = (rel == null ? '' : (rel >= 0 ? '+' : '') + ('0' + Math.abs(rel)).slice(-2) + (a.vs > 300 ? '↑' : a.vs < -300 ? '↓' : '') + ' ') + (a.cs || '');
+      var tail = a.reg || a.cs || a.hex, altTxt = a.alt === 0 ? 'GND' : a.alt == null ? '' : Number(a.alt).toLocaleString() + ' ft';
+      var lbl = '<b>' + tail + '</b> ' + altTxt + (a.vs > 300 ? ' ↑' : a.vs < -300 ? ' ↓' : '');
       L.marker([a.lat, a.lon], { icon: L.divIcon({ className: 'tlabel', html: lbl, iconAnchor: [-14, 6] }) }).addTo(trafLayer);
     });
     setStatus();
@@ -478,6 +562,8 @@ function emShow(i) {
     c.s.map(function (s) { return '<div onclick="this.style.opacity=this.style.opacity===\'0.4\'?\'1\':\'0.4\'" style="padding:12px 6px;border-bottom:1px solid #2B3240;font-size:17px"><b style="display:block">' + s[0] + '</b><span style="color:#FFD60A;font-weight:700">' + s[1] + '</span></div>'; }).join('');
 }
 
+if (dto) { $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + dto.id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>'; }
+
 // ---------- offline chart tiles ----------
 function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
 function lat2y(lat, z) { var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z)); }
@@ -510,7 +596,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v9') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v11') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
@@ -530,7 +616,12 @@ function aeroUrlsAround(pts, radiusNm) {
   var urls = []; Object.keys(cells).forEach(function (c) { Object.keys(AERO_Q).forEach(function (k) { urls.push(aeroUrl(k, cells[c][0], cells[c][1])); }); });
   return urls.concat(['us-roads.json', 'us-cities.json']);
 }
-function saveRoute() { var pts = routeSamples(); if (!pts.length) { $('pMsg').textContent = 'No route yet: plan a flight in the app first.'; return; } saveTiles(tilesAround(pts, 15, 8, 12).concat(aeroUrlsAround(pts, 15)), 'Route corridor'); }
+function saveRouteFreqs() {   // airport frequencies along the route, for offline use
+  if (!API || !TOKEN || !route || !route.points) return;
+  route.points.forEach(function (p) { if (p.type === 'LATLON' || /^[A-Z]{5}$/.test(p.id)) return;
+    fetch(API + '?api=freqs&t=' + TOKEN + '&id=' + encodeURIComponent(p.id)).then(function (r) { return r.json(); }).then(function (d) { if (d && d.list) store('fq_' + p.id, d.list); }).catch(function () {}); });
+}
+function saveRoute() { saveRouteFreqs(); var pts = routeSamples(); if (!pts.length) { $('pMsg').textContent = 'No route yet: plan a flight in the app first.'; return; } saveTiles(tilesAround(pts, 15, 8, 12).concat(aeroUrlsAround(pts, 15)), 'Route corridor'); }
 function saveAround() { if (!me) { $('pMsg').textContent = 'Waiting for GPS.'; return; } saveTiles(tilesAround([[me.lat, me.lon]], 60, 8, 11).concat(aeroUrlsAround([[me.lat, me.lon]], 60)), 'Area around you'); }
 function clearTiles() { caches.delete(TILE_CACHE).then(function () { estimate('Saved charts deleted. '); }); }
 function estimate(prefix) { if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { $('pMsg').textContent = (prefix || '') + 'Using about ' + Math.round(e.usage / 1048576) + ' MB on this phone.'; }); }
