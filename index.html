@@ -65,7 +65,9 @@ var APP_URL = 'https://script.google.com/macros/s/AKfycbwCneDTvq4E6MiLiPfb7k3KLf
   x.fillStyle = '#080E14'; x.fillRect(0, 0, W, H); requestAnimationFrame(frame);
 })();
 
-function go(q) { location.replace(APP_URL + (q ? (APP_URL.indexOf('?') >= 0 ? '&' : '?') + q : '')); }
+// anything passed to this page (for example ?tab=plan&plan=KUSW EKN KMRB from the moving map) goes on to the app
+var PASS = location.search.replace(/^\?/, '').split('&').filter(function (kv) { return /^(tab|plan)=/.test(kv); }).join('&');
+function go(q) { q = [q, PASS].filter(Boolean).join('&'); location.replace(APP_URL + (q ? (APP_URL.indexOf('?') >= 0 ? '&' : '?') + q : '')); }
 document.getElementById('skip').onclick = function (e) { e.preventDefault(); go(''); };
 var done = false;
 function finish(q) { if (done) return; done = true; document.getElementById('msg').innerHTML = '<span class="dots">Opening FlightDeck IQ</span>'; setTimeout(function () { go(q); }, 400); }

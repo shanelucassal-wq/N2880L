@@ -12,14 +12,24 @@
   html,body{margin:0;height:100%;background:#0E1116;font-family:-apple-system,Roboto,Arial,sans-serif}
   .leaflet-container{background:#16202E}
   .stlabel{font:700 12px Arial;color:#9FB3C8;text-shadow:0 0 3px #000;white-space:nowrap;letter-spacing:1px;text-transform:uppercase}
+  .wpl{font:700 12px Arial;color:#fff;background:rgba(14,17,22,.88);border:1.5px solid #C000C0;border-radius:7px;padding:2px 6px;white-space:nowrap;display:inline-block}
+  .wpl.start{border-color:#30D158}.wpl.end{border-color:#FF453A}
+  .wpdot{width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #C000C0;box-sizing:border-box;box-shadow:0 0 3px #000}
+  .wpdot.start{border-color:#30D158;background:#30D158}.wpdot.end{border-color:#FF453A;background:#FF453A}
+  .wpdot.edit{width:24px;height:24px;border-width:4px}
+  .mid{width:22px;height:22px;border-radius:50%;background:rgba(192,0,192,.85);color:#fff;font:700 16px/20px Arial;text-align:center;border:2px solid #fff;box-sizing:border-box}
+  #editbar{position:absolute;left:10px;right:10px;bottom:74px;z-index:1001;background:rgba(20,25,34,.96);border:1px solid #C000C0;border-radius:14px;padding:10px 12px;display:none;color:#E9ECF1;font-size:13px}
+  #editbar .row{display:flex;gap:8px;margin-top:8px}#editbar button{flex:1;border:1px solid #3A4352;border-radius:10px;padding:10px 4px;font-weight:700;font-size:13px;background:#1E2430;color:#E9ECF1}
+  #editbar button.go{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
+  #back{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;border:1px solid #3A4352;border-radius:10px;padding:9px 12px;font-weight:700;font-size:13px;background:rgba(26,31,40,.95);color:#E9ECF1;text-decoration:none}
   .glabel{font:700 12px Arial;color:#30D158;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
   #map{position:absolute;inset:0;bottom:64px}
   #bar{position:absolute;left:0;right:0;bottom:0;height:64px;background:#0E1116;border-top:1px solid #2B3240;color:#fff;display:flex;align-items:center;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom)}
   .cell{text-align:center;min-width:56px}.cell b{display:block;font-size:19px}.cell span{font-size:10px;opacity:.75;letter-spacing:.5px}
   #btns{position:absolute;right:10px;top:calc(10px + env(safe-area-inset-top));display:flex;flex-direction:column;gap:8px;z-index:1000}
-  #btns button{border:1px solid #3A4352;border-radius:10px;padding:10px 12px;font-weight:700;font-size:13px;background:rgba(26,31,40,.95);color:#E9ECF1;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+  #btns button{border:1px solid #3A4352;border-radius:10px;padding:8px 10px;font-weight:700;font-size:12px;background:rgba(26,31,40,.95);color:#E9ECF1;box-shadow:0 1px 6px rgba(0,0,0,.5)}
   #btns button.on{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
-  #status{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;background:rgba(14,17,22,.88);border:1px solid #2B3240;color:#fff;border-radius:10px;padding:6px 10px;font-size:12px;max-width:60%}
+  #status{position:absolute;left:10px;top:calc(54px + env(safe-area-inset-top));z-index:1000;background:rgba(14,17,22,.88);border:1px solid #2B3240;color:#fff;border-radius:10px;padding:6px 10px;font-size:12px;max-width:60%}
   #panel{position:absolute;left:10px;right:10px;bottom:74px;z-index:1001;background:#fff;border-radius:14px;padding:14px;display:none;box-shadow:0 2px 10px rgba(0,0,0,.4);font-size:14px}
   #panel h3{margin:0 0 8px;color:#0B2545}#panel button{border:0;border-radius:10px;padding:10px;margin:4px 4px 0 0;font-weight:700;background:#EEB902;color:#0B2545}
   #panel .sec{background:#E5E7EB}
@@ -31,11 +41,23 @@
 <body>
 <div id="map"></div>
 <div id="status">Starting…</div>
+<a id="back" href="index.html?tab=plan">‹ Plan</a>
+<div id="editbar">
+  <div><b style="color:#E070E0">Editing route</b> · <span id="edInfo"></span></div>
+  <div style="font-size:12px;color:#97A0AF;margin-top:4px">Double tap or press and hold the map to add a point. Drag points to move them; drag a ＋ to bend a leg. Tap a point to remove it.</div>
+  <div class="row"><button onclick="undoEdit()">Undo</button><button onclick="doneEdit()">Done</button><button class="go" onclick="replan()">Re-plan in app</button></div>
+</div>
 <div id="btns">
+  <button id="bEdit" onclick="toggleEdit()">Edit route</button>
   <button id="bFollow" class="on" onclick="toggleFollow()">Follow</button>
   <button id="bTraffic" class="on" onclick="toggleTraffic()">Traffic</button>
   <button id="bRadar" onclick="toggleRadar()">Radar</button>
-  <button id="bBase" onclick="cycleBase()">Chart</button>
+  <button id="bBase" onclick="toggleBaseMenu()">Map: Chart</button>
+  <div id="baseMenu" style="display:none;flex-direction:column;gap:6px;background:rgba(14,17,22,.96);border:1px solid #3A4352;border-radius:12px;padding:6px">
+    <button id="bmChart" onclick="setBase('Chart')">Sectional</button>
+    <button id="bmSatellite" onclick="setBase('Satellite')">Satellite</button>
+    <button id="bmStreets" onclick="setBase('Streets')">Streets</button>
+  </div>
   <button id="bGlide" onclick="toggleGlide()">Glide</button>
   <button onclick="showPanel()">Offline</button>
   <button style="background:rgba(255,69,58,.85);border-color:#FF453A;color:#fff" onclick="showEm()">EMERG</button>
@@ -109,25 +131,81 @@ var BASES = {
   Streets: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 18, maxZoom: 15, attribution: 'Streets: Esri' })
 };
 var baseName = 'Chart'; BASES.Chart.addTo(map);
-function cycleBase() {
-  var order = ['Chart', 'Satellite', 'Streets'], next = order[(order.indexOf(baseName) + 1) % order.length];
-  if (next !== 'Chart' && !navigator.onLine) { next = 'Chart'; setStatus('Satellite and streets need internet'); }
-  map.removeLayer(BASES[baseName]); baseName = next; BASES[baseName].addTo(map);
-  $('bBase').textContent = baseName;
+function toggleBaseMenu() { var s = $('baseMenu').style; s.display = s.display === 'flex' ? 'none' : 'flex'; markBase(); }
+function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n !== 'Chart' && !navigator.onLine) ? 0.4 : 1; }); }
+function setBase(next) {
+  if (next !== 'Chart' && !navigator.onLine) { setStatus('Satellite and streets need internet'); return; }
+  map.removeLayer(BASES[baseName]); baseName = next; BASES[baseName].addTo(map); store('base', baseName);
+  $('bBase').textContent = 'Map: ' + (baseName === 'Chart' ? 'Chart' : baseName === 'Satellite' ? 'Sat' : 'Streets');
+  $('baseMenu').style.display = 'none'; markBase();
 }
-window.addEventListener('offline', function () { if (baseName !== 'Chart') { baseName = 'Satellite'; cycleBase(); } });
+function cycleBase() { var o = ['Chart', 'Satellite', 'Streets']; setBase(o[(o.indexOf(baseName) + 1) % 3]); }
+(function () { var b = recall('base', 'Chart'); if (b !== 'Chart' && navigator.onLine && BASES[b]) setBase(b); })();
+window.addEventListener('offline', function () { if (baseName !== 'Chart') { map.removeLayer(BASES[baseName]); baseName = 'Chart'; BASES.Chart.addTo(map); $('bBase').textContent = 'Map: Chart'; } });
 var radar = L.tileLayer(RADAR, { opacity: 0.55, maxNativeZoom: 10, maxZoom: 14, attribution: 'Radar: IEM' });
 map.on('moveend', function () { store('view', [map.getCenter().lat, map.getCenter().lng]); store('zoom', map.getZoom()); });
 
-// ---------- route ----------
-var route = recall('route', null), routeLayer = L.layerGroup().addTo(map);
+// ---------- route (with labels; editable) ----------
+var route = recall('route', null), routeLayer = L.layerGroup().addTo(map), editing = false, editHist = [];
+function ptLabel(p, i, n) { return p.label || p.id; }
+function legNm(a, b) { return nmBetween([a.lat, a.lon], [b.lat, b.lon]); }
 function drawRoute() {
   routeLayer.clearLayers(); if (!route || !route.points || route.points.length < 2) return;
-  var ll = route.points.map(function (p) { return [p.lat, p.lon]; });
-  L.polyline(ll, { color: '#C000C0', weight: 4, opacity: 0.85 }).addTo(routeLayer);
-  route.points.forEach(function (p) { L.circleMarker([p.lat, p.lon], { radius: 5, color: '#C000C0', fillColor: '#fff', fillOpacity: 1, weight: 2 }).addTo(routeLayer);
-    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'wlabel', html: p.id, iconAnchor: [-6, 18] }) }).addTo(routeLayer); });
+  var P = route.points, n = P.length, ll = P.map(function (p) { return [p.lat, p.lon]; });
+  var line = L.polyline(ll, { color: '#C000C0', weight: editing ? 6 : 4, opacity: 0.9 }).addTo(routeLayer);
+  P.forEach(function (p, i) {
+    var cls = i === 0 ? 'start' : i === n - 1 ? 'end' : '';
+    var mk = L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: '<div class="wpdot ' + cls + (editing ? ' edit' : '') + '"></div>', iconSize: editing ? [24, 24] : [16, 16], iconAnchor: editing ? [12, 12] : [8, 8] }),
+      draggable: editing && i > 0 && i < n - 1, zIndexOffset: 600 }).addTo(routeLayer);
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: '', html: '<span class="wpl ' + cls + '">' + ptLabel(p, i, n) + '</span>', iconAnchor: [-12, 26] }), interactive: false, zIndexOffset: 550 }).addTo(routeLayer);
+    if (editing && i > 0 && i < n - 1) {
+      mk.on('drag', function (e) { var q = e.target.getLatLng(); P[i].lat = q.lat; P[i].lon = q.lng; line.setLatLngs(P.map(function (p) { return [p.lat, p.lon]; })); });
+      mk.on('dragstart', function () { pushHistory(); });
+      mk.on('dragend', function () { setUserPoint(P[i]); edited(); });
+      mk.on('click', function () { if (confirm('Remove ' + ptLabel(P[i]) + ' from the route?')) { pushHistory(); P.splice(i, 1); edited(); } });
+    }
+  });
+  if (editing) {   // ＋ handles in the middle of each leg: drag one to add a point there
+    for (var j = 1; j < n; j++) (function (j) {
+      var a = P[j - 1], b = P[j];
+      var h = L.marker([(a.lat + b.lat) / 2, (a.lon + b.lon) / 2], { icon: L.divIcon({ className: '', html: '<div class="mid">+</div>', iconSize: [22, 22], iconAnchor: [11, 11] }), draggable: true, zIndexOffset: 500 }).addTo(routeLayer);
+      var np = null;
+      h.on('dragstart', function () { pushHistory(); np = { lat: h.getLatLng().lat, lon: h.getLatLng().lng }; P.splice(j, 0, np); });
+      h.on('drag', function (e) { var q = e.target.getLatLng(); np.lat = q.lat; np.lon = q.lng; line.setLatLngs(P.map(function (p) { return [p.lat, p.lon]; })); });
+      h.on('dragend', function () { setUserPoint(np); edited(); });
+    })(j);
+  }
+  var tot = 0; for (var k = 1; k < n; k++) tot += legNm(P[k - 1], P[k]);
+  if ($('edInfo')) $('edInfo').textContent = (n - 1) + ' legs, ' + Math.round(tot) + ' nm';
 }
+function setUserPoint(p) { p.id = p.lat.toFixed(3) + '/' + p.lon.toFixed(3); p.type = 'LATLON'; p.user = true; }
+function relabel() { var k = 0; route.points.forEach(function (p) { if (p.user) p.label = 'WP' + (++k); }); }
+function edited() { route.made = Date.now(); route.edited = true; relabel(); store('route', route); drawRoute(); updateNext(); }
+function pushHistory() { editHist.push(JSON.stringify(route.points)); if (editHist.length > 30) editHist.shift(); }
+function undoEdit() { if (!editHist.length) return; route.points = JSON.parse(editHist.pop()); edited(); }
+function toggleEdit() {
+  if (!route || !route.points || route.points.length < 2) { setStatus('Plan a flight in the app first, then edit it here'); return; }
+  editing = !editing; $('bEdit').classList.toggle('on', editing); $('editbar').style.display = editing ? 'block' : 'none';
+  if (editing) { map.doubleClickZoom.disable(); if (follow) toggleFollow(); } else map.doubleClickZoom.enable();
+  drawRoute();
+}
+function doneEdit() { if (editing) toggleEdit(); }
+function addPointAt(ll) {
+  if (!editing) return;
+  var P = route.points, best = 1, bd = 1e9, q = { lat: ll.lat, lon: ll.lng };
+  for (var i = 1; i < P.length; i++) { var d = legNm(P[i - 1], q) + legNm(q, P[i]) - legNm(P[i - 1], P[i]); if (d < bd) { bd = d; best = i; } }
+  pushHistory(); setUserPoint(q); P.splice(best, 0, q); edited();
+}
+map.on('dblclick', function (e) { addPointAt(e.latlng); });
+map.on('contextmenu', function (e) { addPointAt(e.latlng); });
+// back to the app's Plan tab; with the edited route, the app plans it again
+function appLink(withRoute) {
+  var q = 'tab=plan';
+  if (withRoute && route && route.points) q += '&plan=' + encodeURIComponent(route.points.map(function (p) { return p.id; }).join(' '));
+  return 'index.html?' + q;
+}
+function replan() { location.href = appLink(true); }
+$('back').onclick = function (e) { e.preventDefault(); location.href = appLink(route && route.edited && confirm('Re-plan with your edited route?')); };
 function fetchRoute() {
   if (!API || !TOKEN || !navigator.onLine) return;
   fetch(API + '?api=route&t=' + TOKEN).then(function (r) { return r.json(); }).then(function (r) {
