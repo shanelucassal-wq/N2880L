@@ -1,6 +1,6 @@
 /* N2880L moving map service worker: keeps the map page and saved chart tiles available offline */
-var SHELL = 'n2880l-shell-v7', TILES = 'n2880l-tiles-v1';
-var SHELL_FILES = ['map.html', 'manifest.json', 'icon.png', 'us-states.json',
+var SHELL = 'n2880l-shell-v8', TILES = 'n2880l-tiles-v1', AERO = 'n2880l-aero-v1';
+var SHELL_FILES = ['map.html', 'manifest.json', 'icon.png', 'us-states.json', 'us-cities.json',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'];
 self.addEventListener('install', function (e) {
@@ -18,7 +18,12 @@ self.addEventListener('fetch', function (e) {
     }));
     return;
   }
-  if (u.indexOf('cdnjs.cloudflare.com') >= 0 || /map\.html|manifest\.json|icon\.png|us-states\.json/.test(u)) {   // app shell: network first, saved copy offline
+  if (u.indexOf('services6.arcgis.com') >= 0) {                         // FAA overlay data: fresh when online, saved copy offline
+    e.respondWith(fetch(e.request).then(function (r) { if (r && r.ok) { var cp = r.clone(); caches.open(AERO).then(function (c) { c.put(u, cp); }); } return r; })
+      .catch(function () { return caches.open(AERO).then(function (c) { return c.match(u); }); }));
+    return;
+  }
+  if (u.indexOf('cdnjs.cloudflare.com') >= 0 || /map\.html|manifest\.json|icon\.png|us-states\.json|us-roads\.json|us-cities\.json/.test(u)) {   // app shell: network first, saved copy offline
     e.respondWith(fetch(e.request).then(function (r) { var cp = r.clone(); caches.open(SHELL).then(function (c) { c.put(e.request, cp); }); return r; })
       .catch(function () { return caches.match(e.request, { ignoreSearch: true }); }));
   }

@@ -68,7 +68,7 @@
 </div>
 <div id="panel">
   <h3>Offline charts</h3>
-  <div id="pInfo">Save sectional chart tiles on this phone so the map works with no signal.</div>
+  <div id="pInfo">Saves sectional charts, the aeronautical overlay and the street map on this phone so they work with no signal. (Satellite needs internet.)</div>
   <div class="bar"><i id="pBar"></i></div>
   <div id="pMsg" style="font-size:12px;color:#555"></div>
   <button onclick="saveRoute()">Save charts for my route</button>
@@ -135,17 +135,44 @@ var BASES = {
   Streets: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxNativeZoom: 18, maxZoom: 15, attribution: 'Streets: Esri' })
 };
 var baseName = 'Chart'; BASES.Chart.addTo(map);
+// Offline street map: public domain Natural Earth highways and towns, saved on the phone
+var offStreets = L.layerGroup(), offLoaded = false, offCities = [], offCityLayer = L.layerGroup(), canvasR = L.canvas({ padding: 0.3 });
+function loadOffStreets() {
+  if (offLoaded) return; offLoaded = true;
+  fetch('us-roads.json').then(function (r) { return r.json(); }).then(function (rd) {
+    var by = { F: [], P: [], S: [] }; rd.forEach(function (f) { by[f[0]].push(f[2].map(function (c) { return [c[1], c[0]]; })); });
+    L.polyline(by.S, { renderer: canvasR, color: '#8C97A6', weight: 1, opacity: 0.8, interactive: false }).addTo(offStreets);
+    L.polyline(by.P, { renderer: canvasR, color: '#E8D27A', weight: 1.8, opacity: 0.9, interactive: false }).addTo(offStreets);
+    L.polyline(by.F, { renderer: canvasR, color: '#F2A65A', weight: 2.8, opacity: 0.95, interactive: false }).addTo(offStreets);
+  }).catch(function () { offLoaded = false; });
+  fetch('us-cities.json').then(function (r) { return r.json(); }).then(function (c) { offCities = c; drawCities(); }).catch(function () {});
+}
+function drawCities() {
+  offCityLayer.clearLayers(); if (!map.hasLayer(offStreets)) return;
+  var z = map.getZoom(), lim = z < 7 ? 3 : z < 8 ? 5 : z < 9 ? 7 : 11, vb = map.getBounds().pad(0.1);
+  offCities.forEach(function (c) { if (c[3] > lim || !vb.contains([c[1], c[2]])) return;
+    L.circleMarker([c[1], c[2]], { radius: 3, color: '#fff', weight: 1, fillColor: '#fff', fillOpacity: 0.9, interactive: false }).addTo(offCityLayer);
+    L.marker([c[1], c[2]], { interactive: false, icon: L.divIcon({ className: 'stlabel', html: c[0], iconAnchor: [-6, 7] }) }).addTo(offCityLayer); });
+}
+map.on('moveend', drawCities);
+function showStreets() {   // tiles when online, the saved vector map when offline
+  if (navigator.onLine) { map.removeLayer(offStreets); map.removeLayer(offCityLayer); BASES.Streets.addTo(map); }
+  else { map.removeLayer(BASES.Streets); loadOffStreets(); offStreets.addTo(map); offCityLayer.addTo(map); drawCities(); }
+}
 function toggleBaseMenu() { var s = $('baseMenu').style; s.display = s.display === 'flex' ? 'none' : 'flex'; markBase(); }
-function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n !== 'Chart' && !navigator.onLine) ? 0.4 : 1; });
+function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n === 'Satellite' && !navigator.onLine) ? 0.4 : 1; });
   if ($('bmAero')) { $('bmAero').classList.toggle('on', aeroOn); $('bmAero').textContent = 'Aero overlay: ' + (aeroOn ? 'On' : 'Off'); $('bmAero').style.opacity = baseName === 'Chart' ? 0.4 : 1; } }
 function setBase(next) {
-  if (next !== 'Chart' && !navigator.onLine) { setStatus('Satellite and streets need internet'); return; }
-  map.removeLayer(BASES[baseName]); baseName = next; BASES[baseName].addTo(map); store('base', baseName);
+  if (next === 'Satellite' && !navigator.onLine) { setStatus('Satellite needs internet. Streets and Sectional work offline.'); return; }
+  map.removeLayer(BASES[baseName]); map.removeLayer(offStreets); map.removeLayer(offCityLayer);
+  baseName = next; store('base', baseName);
+  if (baseName === 'Streets') showStreets(); else BASES[baseName].addTo(map);
   $('bBase').textContent = 'Map: ' + (baseName === 'Chart' ? 'Chart' : baseName === 'Satellite' ? 'Sat' : 'Streets');
   $('baseMenu').style.display = 'none'; markBase(); if (typeof refreshAero === 'function') refreshAero();
 }
 function cycleBase() { var o = ['Chart', 'Satellite', 'Streets']; setBase(o[(o.indexOf(baseName) + 1) % 3]); }
-window.addEventListener('offline', function () { if (baseName !== 'Chart') { map.removeLayer(BASES[baseName]); baseName = 'Chart'; BASES.Chart.addTo(map); $('bBase').textContent = 'Map: Chart'; } });
+window.addEventListener('offline', function () { if (baseName === 'Satellite') setBase('Chart'); else if (baseName === 'Streets') showStreets(); });
+window.addEventListener('online', function () { if (baseName === 'Streets') showStreets(); refreshAero && refreshAero(); });
 var radar = L.tileLayer(RADAR, { opacity: 0.55, maxNativeZoom: 10, maxZoom: 14, attribution: 'Radar: IEM' });
 map.on('moveend', function () { store('view', [map.getCenter().lat, map.getCenter().lng]); store('zoom', map.getZoom()); });
 
@@ -162,8 +189,14 @@ var AERO_Q = {
   apt: { svc: 'US_Airport', minZ: 8, where: "TYPE_CODE='AD' AND PRIVATEUSE=0", fields: 'IDENT,ICAO_ID,NAME,ELEVATION,IAPEXISTS' },
   fix: { svc: 'DesignatedPoints', minZ: 9, where: "TYPE_CODE IN ('WPT','RPT','CNF','VFR')", fields: 'IDENT,TYPE_CODE' }
 };
+function aeroUrl(k, la, lo) {
+  var q = AERO_Q[k];
+  return FAA + q.svc + '/FeatureServer/0/query?where=' + encodeURIComponent(q.where) + '&outFields=' + q.fields +
+    '&geometry=' + lo + ',' + la + ',' + (lo + 1) + ',' + (la + 1) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326&resultRecordCount=1000' +
+    (q.poly ? '&maxAllowableOffset=0.002&geometryPrecision=4' : '') + '&f=geojson';
+}
 function toggleAero() { aeroOn = !aeroOn; store('aero', aeroOn); markBase(); refreshAero(); }
-function aeroShowing() { return aeroOn && baseName !== 'Chart' && navigator.onLine; }
+function aeroShowing() { return aeroOn && baseName !== 'Chart'; }   // works offline from saved data
 var aeroTimer = null;
 map.on('moveend', function () { clearTimeout(aeroTimer); aeroTimer = setTimeout(refreshAero, 400); });
 function refreshAero() {
@@ -175,9 +208,7 @@ function refreshAero() {
     for (var la = Math.floor(b.getSouth()); la <= Math.floor(b.getNorth()); la++) for (var lo = Math.floor(b.getWest()); lo <= Math.floor(b.getEast()); lo++) {
       var key = k + la + '_' + lo; if (aeroCells[key]) continue; aeroCells[key] = 'loading'; pend++;
       (function (k, key, la, lo) {
-        var url = FAA + q.svc + '/FeatureServer/0/query?where=' + encodeURIComponent(q.where) + '&outFields=' + q.fields +
-          '&geometry=' + lo + ',' + la + ',' + (lo + 1) + ',' + (la + 1) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326&resultRecordCount=1000' +
-          (q.poly ? '&maxAllowableOffset=0.002&geometryPrecision=4' : '') + '&f=geojson';
+        var url = aeroUrl(k, la, lo);
         fetch(url).then(function (r) { return r.json(); }).then(function (g) {
           (g.features || []).forEach(function (f) { var id = (f.id != null ? f.id : JSON.stringify(f.properties)); aeroData[k][id] = f; });
           aeroCells[key] = 'done'; drawAero();
@@ -226,7 +257,7 @@ function drawAero() {
 }
 
 // restore the last base map (after the overlay is set up)
-(function () { var b = recall('base', 'Chart'); if (b !== 'Chart' && navigator.onLine && BASES[b]) setBase(b); })();
+(function () { var b = recall('base', 'Chart'); if (b === 'Streets' || (b === 'Satellite' && navigator.onLine)) setBase(b); })();
 
 // ---------- route (with labels; editable) ----------
 var route = recall('route', null), routeLayer = L.layerGroup().addTo(map), editing = false, editHist = [];
@@ -466,20 +497,28 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      cache.match(u).then(function (hit) {
-        if (hit) return;
-        return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return cache.put(u, r); });
-      }).catch(function () {}).then(function () {
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v8') : Promise.resolve(cache);
+      target.then(function (c) { return c.match(u).then(function (hit) {
+        if (hit && !/services6/.test(u)) return;
+        return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
+      }); }).catch(function () {}).then(function () {
         done++; $('pBar').style.width = Math.round(done / urls.length * 100) + '%';
-        $('pMsg').textContent = label + ': ' + done + ' of ' + urls.length + ' tiles (' + got + ' downloaded)';
-        if (done === urls.length) { saving = false; estimate(label + ' saved: ' + urls.length + ' tiles. '); } else next();
+        $('pMsg').textContent = label + ': ' + done + ' of ' + urls.length + ' items (' + got + ' downloaded)';
+        if (done === urls.length) { saving = false; estimate(label + ' saved: ' + urls.length + ' items. '); } else next();
       });
     }
     for (var k = 0; k < 6; k++) next();
   });
 }
-function saveRoute() { var pts = routeSamples(); if (!pts.length) { $('pMsg').textContent = 'No route yet: plan a flight in the app first.'; return; } saveTiles(tilesAround(pts, 15, 8, 12), 'Route corridor'); }
-function saveAround() { if (!me) { $('pMsg').textContent = 'Waiting for GPS.'; return; } saveTiles(tilesAround([[me.lat, me.lon]], 60, 8, 11), 'Area around you'); }
+function aeroUrlsAround(pts, radiusNm) {
+  var cells = {};
+  pts.forEach(function (p) { var d = radiusNm / 60, e = d / Math.cos(p[0] * Math.PI / 180);
+    for (var la = Math.floor(p[0] - d); la <= Math.floor(p[0] + d); la++) for (var lo = Math.floor(p[1] - e); lo <= Math.floor(p[1] + e); lo++) cells[la + '_' + lo] = [la, lo]; });
+  var urls = []; Object.keys(cells).forEach(function (c) { Object.keys(AERO_Q).forEach(function (k) { urls.push(aeroUrl(k, cells[c][0], cells[c][1])); }); });
+  return urls.concat(['us-roads.json', 'us-cities.json']);
+}
+function saveRoute() { var pts = routeSamples(); if (!pts.length) { $('pMsg').textContent = 'No route yet: plan a flight in the app first.'; return; } saveTiles(tilesAround(pts, 15, 8, 12).concat(aeroUrlsAround(pts, 15)), 'Route corridor'); }
+function saveAround() { if (!me) { $('pMsg').textContent = 'Waiting for GPS.'; return; } saveTiles(tilesAround([[me.lat, me.lon]], 60, 8, 11).concat(aeroUrlsAround([[me.lat, me.lon]], 60)), 'Area around you'); }
 function clearTiles() { caches.delete(TILE_CACHE).then(function () { estimate('Saved charts deleted. '); }); }
 function estimate(prefix) { if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { $('pMsg').textContent = (prefix || '') + 'Using about ' + Math.round(e.usage / 1048576) + ' MB on this phone.'; }); }
 function showPanel() { $('panel').style.display = 'block'; estimate(); }
