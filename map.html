@@ -22,6 +22,8 @@
   #editbar .row{display:flex;gap:8px;margin-top:8px}#editbar button{flex:1;border:1px solid #3A4352;border-radius:10px;padding:10px 4px;font-weight:700;font-size:13px;background:#1E2430;color:#E9ECF1}
   #editbar button.go{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
   #back{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;border:1px solid #3A4352;border-radius:10px;padding:9px 12px;font-weight:700;font-size:13px;background:rgba(26,31,40,.95);color:#E9ECF1;text-decoration:none}
+  .alab{font:700 11px Arial;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000;white-space:nowrap}
+  .alab.vor{color:#7FB2FF}.alab.fix{color:#E8E8E8;font-weight:600;font-size:10px}.alab.apt{color:#FF7AFF}
   .glabel{font:700 12px Arial;color:#30D158;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
   #map{position:absolute;inset:0;bottom:64px}
   #bar{position:absolute;left:0;right:0;bottom:0;height:64px;background:#0E1116;border-top:1px solid #2B3240;color:#fff;display:flex;align-items:center;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom)}
@@ -58,6 +60,7 @@
     <button id="bmChart" onclick="setBase('Chart')">Sectional</button>
     <button id="bmSatellite" onclick="setBase('Satellite')">Satellite</button>
     <button id="bmStreets" onclick="setBase('Streets')">Streets</button>
+    <button id="bmAero" onclick="toggleAero()">Aero overlay</button>
   </div>
   <button id="bGlide" onclick="toggleGlide()">Glide</button>
   <button onclick="showPanel()">Offline</button>
@@ -133,18 +136,97 @@ var BASES = {
 };
 var baseName = 'Chart'; BASES.Chart.addTo(map);
 function toggleBaseMenu() { var s = $('baseMenu').style; s.display = s.display === 'flex' ? 'none' : 'flex'; markBase(); }
-function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n !== 'Chart' && !navigator.onLine) ? 0.4 : 1; }); }
+function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n !== 'Chart' && !navigator.onLine) ? 0.4 : 1; });
+  if ($('bmAero')) { $('bmAero').classList.toggle('on', aeroOn); $('bmAero').textContent = 'Aero overlay: ' + (aeroOn ? 'On' : 'Off'); $('bmAero').style.opacity = baseName === 'Chart' ? 0.4 : 1; } }
 function setBase(next) {
   if (next !== 'Chart' && !navigator.onLine) { setStatus('Satellite and streets need internet'); return; }
   map.removeLayer(BASES[baseName]); baseName = next; BASES[baseName].addTo(map); store('base', baseName);
   $('bBase').textContent = 'Map: ' + (baseName === 'Chart' ? 'Chart' : baseName === 'Satellite' ? 'Sat' : 'Streets');
-  $('baseMenu').style.display = 'none'; markBase();
+  $('baseMenu').style.display = 'none'; markBase(); if (typeof refreshAero === 'function') refreshAero();
 }
 function cycleBase() { var o = ['Chart', 'Satellite', 'Streets']; setBase(o[(o.indexOf(baseName) + 1) % 3]); }
-(function () { var b = recall('base', 'Chart'); if (b !== 'Chart' && navigator.onLine && BASES[b]) setBase(b); })();
 window.addEventListener('offline', function () { if (baseName !== 'Chart') { map.removeLayer(BASES[baseName]); baseName = 'Chart'; BASES.Chart.addTo(map); $('bBase').textContent = 'Map: Chart'; } });
 var radar = L.tileLayer(RADAR, { opacity: 0.55, maxNativeZoom: 10, maxZoom: 14, attribution: 'Radar: IEM' });
 map.on('moveend', function () { store('view', [map.getCenter().lat, map.getCenter().lng]); store('zoom', map.getZoom()); });
+
+
+// ---------- aeronautical overlay for satellite and streets (FAA data, internet only) ----------
+var FAA = 'https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/';
+var aeroOn = recall('aero', true), aeroCells = {}, aeroData = { asp: {}, sua: {}, nav: {}, apt: {}, fix: {} };
+map.createPane('aeroPane'); map.getPane('aeroPane').style.zIndex = 420;
+var aeroLayer = L.layerGroup();
+var AERO_Q = {
+  asp: { svc: 'Class_Airspace', minZ: 7, where: "CLASS IN ('B','C','D') OR LOCAL_TYPE='CLASS_E2'", fields: 'NAME,CLASS,LOCAL_TYPE,UPPER_VAL,LOWER_VAL,UPPER_DESC,LOWER_DESC', poly: true },
+  sua: { svc: 'Special_Use_Airspace', minZ: 7, where: "TYPE_CODE IN ('R','P','W','A','MOA')", fields: 'NAME,TYPE_CODE,UPPER_VAL,LOWER_VAL,TIMESOFUSE', poly: true },
+  nav: { svc: 'NAVAIDSystem', minZ: 7, where: '1=1', fields: 'IDENT,NAME_TXT,CLASS_TXT,TYPE_CODE' },
+  apt: { svc: 'US_Airport', minZ: 8, where: "TYPE_CODE='AD' AND PRIVATEUSE=0", fields: 'IDENT,ICAO_ID,NAME,ELEVATION,IAPEXISTS' },
+  fix: { svc: 'DesignatedPoints', minZ: 9, where: "TYPE_CODE IN ('WPT','RPT','CNF','VFR')", fields: 'IDENT,TYPE_CODE' }
+};
+function toggleAero() { aeroOn = !aeroOn; store('aero', aeroOn); markBase(); refreshAero(); }
+function aeroShowing() { return aeroOn && baseName !== 'Chart' && navigator.onLine; }
+var aeroTimer = null;
+map.on('moveend', function () { clearTimeout(aeroTimer); aeroTimer = setTimeout(refreshAero, 400); });
+function refreshAero() {
+  if (!aeroShowing()) { map.removeLayer(aeroLayer); return; }
+  aeroLayer.addTo(map);
+  var z = map.getZoom(), b = map.getBounds(), pend = 0;
+  Object.keys(AERO_Q).forEach(function (k) {
+    var q = AERO_Q[k]; if (z < q.minZ) return;
+    for (var la = Math.floor(b.getSouth()); la <= Math.floor(b.getNorth()); la++) for (var lo = Math.floor(b.getWest()); lo <= Math.floor(b.getEast()); lo++) {
+      var key = k + la + '_' + lo; if (aeroCells[key]) continue; aeroCells[key] = 'loading'; pend++;
+      (function (k, key, la, lo) {
+        var url = FAA + q.svc + '/FeatureServer/0/query?where=' + encodeURIComponent(q.where) + '&outFields=' + q.fields +
+          '&geometry=' + lo + ',' + la + ',' + (lo + 1) + ',' + (la + 1) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326&resultRecordCount=1000' +
+          (q.poly ? '&maxAllowableOffset=0.002&geometryPrecision=4' : '') + '&f=geojson';
+        fetch(url).then(function (r) { return r.json(); }).then(function (g) {
+          (g.features || []).forEach(function (f) { var id = (f.id != null ? f.id : JSON.stringify(f.properties)); aeroData[k][id] = f; });
+          aeroCells[key] = 'done'; drawAero();
+        }).catch(function () { delete aeroCells[key]; });
+      })(k, key, la, lo);
+    }
+  });
+  drawAero();
+}
+function altTxt(v, d) { if (v == null || v === '' || v === -9998) return d === 'AA' ? 'top' : 'SFC'; var n = Number(v); return isNaN(n) ? String(v) : (n === 0 ? 'SFC' : n >= 18000 && n < 100000 ? 'FL' + Math.round(n / 100) : n.toLocaleString()); }
+function drawAero() {
+  aeroLayer.clearLayers(); if (!aeroShowing()) return;
+  var z = map.getZoom(), vb = map.getBounds().pad(0.2);
+  var ASP = { B: { color: '#4C8DFF', weight: 2.5 }, C: { color: '#E060E0', weight: 2.5 }, D: { color: '#4C8DFF', weight: 2, dashArray: '8 6' }, E: { color: '#E060E0', weight: 1.5, dashArray: '6 6' } };
+  if (z >= 7) {
+    Object.values(aeroData.asp).forEach(function (f) {
+      var p = f.properties, st = ASP[p.CLASS] || ASP.E;
+      L.geoJSON(f, { pane: 'aeroPane', style: Object.assign({ fill: true, fillOpacity: 0.04, fillColor: st.color }, st) })
+        .bindPopup('<b>' + p.NAME + '</b><br>Class ' + p.CLASS + ': ' + altTxt(p.LOWER_VAL, p.LOWER_DESC) + ' to ' + altTxt(p.UPPER_VAL, p.UPPER_DESC)).addTo(aeroLayer);
+    });
+    Object.values(aeroData.sua).forEach(function (f) {
+      var p = f.properties, moa = p.TYPE_CODE === 'MOA' || p.TYPE_CODE === 'A';
+      L.geoJSON(f, { pane: 'aeroPane', style: { color: moa ? '#C77DFF' : '#5AA0FF', weight: 2, dashArray: moa ? '2 6' : '10 4', fillOpacity: 0.06, fillColor: moa ? '#C77DFF' : '#5AA0FF' } })
+        .bindPopup('<b>' + p.NAME + '</b><br>' + ({ R: 'Restricted', P: 'Prohibited', W: 'Warning', A: 'Alert', MOA: 'MOA' }[p.TYPE_CODE] || p.TYPE_CODE) + ': ' + altTxt(p.LOWER_VAL) + ' to ' + altTxt(p.UPPER_VAL) + (p.TIMESOFUSE ? '<br>' + p.TIMESOFUSE : '')).addTo(aeroLayer);
+    });
+    Object.values(aeroData.nav).forEach(function (f) {
+      var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
+      var vor = /VOR|TAC/.test(p.CLASS_TXT || '');
+      L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: vor ? '<svg width="18" height="18" viewBox="0 0 18 18"><polygon points="5,2 13,2 17,9 13,16 5,16 1,9" fill="none" stroke="#7FB2FF" stroke-width="2"/><circle cx="9" cy="9" r="1.8" fill="#7FB2FF"/></svg>' : '<svg width="14" height="14"><circle cx="7" cy="7" r="5" fill="none" stroke="#C77DFF" stroke-width="2" stroke-dasharray="2 2"/></svg>' }) })
+        .bindPopup('<b>' + p.IDENT + '</b> ' + (p.NAME_TXT || '') + '<br>' + (p.CLASS_TXT || '')).addTo(aeroLayer);
+      L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab vor', html: p.IDENT, iconAnchor: [-10, 6] }) }).addTo(aeroLayer);
+    });
+  }
+  if (z >= 8) Object.values(aeroData.apt).forEach(function (f) {
+    var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties, id = p.ICAO_ID || p.IDENT;
+    L.circleMarker([c[1], c[0]], { pane: 'aeroPane', radius: 5, color: '#FF7AFF', weight: 2, fillColor: '#2A0A2A', fillOpacity: 0.9 })
+      .bindPopup('<b>' + id + '</b> ' + p.NAME + '<br>Elevation ' + p.ELEVATION + ' ft' + (p.IAPEXISTS ? '<br>Instrument approaches' : '')).addTo(aeroLayer);
+    L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab apt', html: id, iconAnchor: [-8, 6] }) }).addTo(aeroLayer);
+  });
+  if (z >= 9) Object.values(aeroData.fix).forEach(function (f) {
+    var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
+    L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5], html: '<svg width="10" height="10"><polygon points="5,1 9,9 1,9" fill="none" stroke="#E8E8E8" stroke-width="1.5"/></svg>' }) })
+      .bindPopup('<b>' + p.IDENT + '</b> (fix)').addTo(aeroLayer);
+    if (z >= 10) L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab fix', html: p.IDENT, iconAnchor: [-6, 5] }) }).addTo(aeroLayer);
+  });
+}
+
+// restore the last base map (after the overlay is set up)
+(function () { var b = recall('base', 'Chart'); if (b !== 'Chart' && navigator.onLine && BASES[b]) setBase(b); })();
 
 // ---------- route (with labels; editable) ----------
 var route = recall('route', null), routeLayer = L.layerGroup().addTo(map), editing = false, editHist = [];
