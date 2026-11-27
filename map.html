@@ -23,7 +23,7 @@
   #editbar button.go{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
   #back{position:absolute;left:10px;top:calc(10px + env(safe-area-inset-top));z-index:1000;border:1px solid #3A4352;border-radius:10px;padding:9px 12px;font-weight:700;font-size:13px;background:rgba(26,31,40,.95);color:#E9ECF1;text-decoration:none}
   .alab{font:700 11px Arial;color:#fff;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000;white-space:nowrap}
-  .alab.vor{color:#7FB2FF}.alab.fix{color:#E8E8E8;font-weight:600;font-size:10px}.alab.apt{color:#FF7AFF}
+  .alab.vor{color:#7FB2FF}.alab.fix{color:#4DF2FF;font-weight:800;font-size:12px;letter-spacing:.3px;text-shadow:0 0 3px #000,0 0 3px #000,0 0 3px #000,0 0 2px #000;background:rgba(0,0,0,.45);border-radius:4px;padding:0 3px}.alab.apt{color:#FF7AFF}
   .addbtn{margin-top:8px;border:0;border-radius:8px;padding:8px 10px;font-weight:700;background:#C000C0;color:#fff;width:100%}
   .glabel{font:700 12px Arial;color:#30D158;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
   #map{position:absolute;inset:0;bottom:64px}
@@ -258,9 +258,12 @@ function drawAero() {
   });
   if (z >= 9) Object.values(aeroData.fix).forEach(function (f) {
     var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
-    L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5], html: '<svg width="10" height="10"><polygon points="5,1 9,9 1,9" fill="none" stroke="#E8E8E8" stroke-width="1.5"/></svg>' }) })
+    // GPS fix: large, filled, outlined triangle that stands out on charts, satellite and streets (bigger tap target too)
+    var fs = z >= 11 ? 18 : z >= 10 ? 16 : 13;
+    L.marker([c[1], c[0]], { pane: 'aeroPane', icon: L.divIcon({ className: '', iconSize: [fs + 12, fs + 12], iconAnchor: [(fs + 12) / 2, (fs + 12) / 2],
+      html: '<svg width="' + (fs + 12) + '" height="' + (fs + 12) + '" viewBox="-6 -6 ' + (fs + 12) + ' ' + (fs + 12) + '"><polygon points="' + (fs / 2) + ',0 ' + fs + ',' + (fs * 0.87) + ' 0,' + (fs * 0.87) + '" fill="#4DF2FF" stroke="#000" stroke-width="2.2" stroke-linejoin="round"/><circle cx="' + (fs / 2) + '" cy="' + (fs * 0.58) + '" r="1.6" fill="#000"/></svg>' }) })
 .addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], p.IDENT, c[1], c[0], 'FIX', '(GPS fix)');
-    if (z >= 10) L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab fix', html: p.IDENT, iconAnchor: [-6, 5] }) }).addTo(aeroLayer);
+    L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab fix', html: p.IDENT, iconAnchor: [-(fs / 2 + 4), 7] }) }).addTo(aeroLayer);
   });
 }
 
@@ -596,7 +599,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v11') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v12') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
