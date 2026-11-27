@@ -45,7 +45,8 @@
 <div id="editbar">
   <div><b style="color:#E070E0">Editing route</b> · <span id="edInfo"></span></div>
   <div style="font-size:12px;color:#97A0AF;margin-top:4px">Double tap or press and hold the map to add a point. Drag points to move them; drag a ＋ to bend a leg. Tap a point to remove it.</div>
-  <div class="row"><button onclick="undoEdit()">Undo</button><button onclick="doneEdit()">Done</button><button class="go" onclick="replan()">Re-plan in app</button></div>
+  <div class="row"><button onclick="reverseRte()">⇄ Reverse</button><button onclick="clearWps()">✕ Clear points</button><button onclick="undoEdit()">Undo</button></div>
+  <div class="row"><button onclick="doneEdit()">Done</button><button class="go" onclick="replan()">Re-plan in app</button></div>
 </div>
 <div id="btns">
   <button id="bEdit" onclick="toggleEdit()">Edit route</button>
@@ -189,6 +190,8 @@ function toggleEdit() {
   if (editing) { map.doubleClickZoom.disable(); if (follow) toggleFollow(); } else map.doubleClickZoom.enable();
   drawRoute();
 }
+function reverseRte() { pushHistory(); route.points.reverse(); edited(); }
+function clearWps() { if (route.points.length <= 2) return; if (!confirm('Remove all waypoints between ' + route.points[0].id + ' and ' + route.points[route.points.length - 1].id + '?')) return; pushHistory(); route.points = [route.points[0], route.points[route.points.length - 1]]; edited(); }
 function doneEdit() { if (editing) toggleEdit(); }
 function addPointAt(ll) {
   if (!editing) return;
