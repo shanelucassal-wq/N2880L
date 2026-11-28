@@ -317,7 +317,7 @@ function drawRoute() {
 }
 function setUserPoint(p) { p.id = p.lat.toFixed(3) + '/' + p.lon.toFixed(3); p.type = 'LATLON'; p.user = true; }
 function relabel() { var k = 0; route.points.forEach(function (p) { if (p.user) p.label = 'WP' + (++k); }); }
-function edited() { route.made = Date.now(); route.edited = true; relabel(); store('route', route); drawRoute(); updateNext(); }
+function edited() { route.made = Date.now(); route.edited = true; relabel(); store('route', route); drawRoute(); updateNext(); drawRunways(); }
 function pushHistory() { editHist.push(JSON.stringify(route.points)); if (editHist.length > 30) editHist.shift(); }
 function undoEdit() { if (!editHist.length) return; route.points = JSON.parse(editHist.pop()); edited(); }
 function toggleEdit() {
@@ -337,6 +337,7 @@ function pointPopup(id, lat, lon, type, detail) {
   return '<div style="min-width:200px"><b style="font-size:14px">' + id + '</b> ' + (detail || '') +
     b('→ Direct to ' + id, "directTo('" + id + "'," + lat + ',' + lon + ",'" + type + "')", '#D4A000') +
     b('+ Add to route', "addAeroPoint('" + id + "'," + lat + ',' + lon + ",'" + type + "')", '#C000C0') +
+    (type === 'AIRPORT' ? b('⚑ Make this my destination', "setDestination('" + id + "'," + lat + ',' + lon + ")", '#FF9F0A') : '') +
     (type === 'AIRPORT' ? '<div id="fq_' + id.replace(/[^A-Z0-9]/gi, '') + '" style="margin-top:8px;font-size:12px;color:#555">Loading frequencies…</div>' : '') + '</div>';
 }
 function bindPoint(marker, id, lat, lon, type, detail) {
@@ -363,6 +364,62 @@ function loadFreqs(id) {
   }).catch(function () {});
 }
 
+
+/* ---------- new destination ---------- */
+function setDestination(id, lat, lon) {
+  map.closePopup();
+  var dest = { id: id, lat: Number(lat), lon: Number(lon), type: 'AIRPORT' };
+  if (!route || !route.points || route.points.length < 2) {
+    route = { points: [me ? { id: me.lat.toFixed(3) + '/' + me.lon.toFixed(3), lat: me.lat, lon: me.lon, type: 'LATLON', user: true, label: 'Start' } : dest, dest], made: Date.now() };
+  } else if (me && me.gs > 40) {
+    // in the air: divert from where you are now
+    pushHistory();
+    route.points = [{ id: me.lat.toFixed(3) + '/' + me.lon.toFixed(3), lat: me.lat, lon: me.lon, type: 'LATLON', user: true, label: 'PPOS' }, dest];
+  } else {
+    pushHistory();
+    route.points[route.points.length - 1] = dest;
+  }
+  if (dto) cancelDto();
+  edited();
+  setStatus('New destination ' + id + (me && me.gs > 40 ? ' (direct from your position)' : '') + '. Re-plan in app for winds, fuel and radio.');
+  loadFreqs(id);
+}
+
+/* ---------- runways at the destination (and a Direct to airport): real direction, extended centerlines, labels ---------- */
+var rwyData = null, rwyLayer = L.layerGroup().addTo(map);
+map.createPane('rwyPane'); map.getPane('rwyPane').style.zIndex = 445;
+function loadRunways(then) { if (rwyData) { then(); return; } fetch('us-runways.json').then(function (r) { return r.json(); }).then(function (d) { rwyData = d; then(); }).catch(function () {}); }
+function rwyKey(id) { if (!rwyData) return null; id = String(id).toUpperCase(); return rwyData[id] ? id : rwyData['K' + id] ? 'K' + id : (id.length === 4 && id[0] === 'K' && rwyData[id.slice(1)]) ? id.slice(1) : null; }
+function drawRunways() {
+  loadRunways(function () {
+    rwyLayer.clearLayers();
+    var ids = [];
+    if (route && route.points && route.points.length) ids.push(route.points[route.points.length - 1].id);
+    if (dto && dto.type === 'AIRPORT') ids.push(dto.id);
+    var z = map.getZoom(), ext = z >= 12 ? 2.5 : z >= 10 ? 4 : 5;   // nm of extended centerline
+    ids.filter(function (v, i, a) { return a.indexOf(v) === i; }).forEach(function (id) {
+      var k = rwyKey(id); if (!k) return;
+      rwyData[k].forEach(function (r) {
+        var A = [r[1], r[2]], B = [r[4], r[5]];
+        L.polyline([A, B], { pane: 'rwyPane', color: '#000', weight: 9, opacity: 0.9, interactive: false }).addTo(rwyLayer);
+        L.polyline([A, B], { pane: 'rwyPane', color: '#FFFFFF', weight: 5, interactive: false }).addTo(rwyLayer);
+        // extended centerline out from each end, and the runway number at the far end (the way you would approach it)
+        [[A, B, r[0]], [B, A, r[3]]].forEach(function (e) {
+          var end = e[0], other = e[1], cosL = Math.cos(end[0] * Math.PI / 180);
+          var dx = (end[1] - other[1]) * cosL, dy = end[0] - other[0], len = Math.sqrt(dx * dx + dy * dy) || 1;
+          var ux = dx / len, uy = dy / len, d = ext / 60;
+          var out = [end[0] + uy * d, end[1] + ux * d / cosL];
+          L.polyline([end, out], { pane: 'rwyPane', color: '#FFFFFF', weight: 2.5, dashArray: '8 6', opacity: 0.95, interactive: false }).addTo(rwyLayer);
+          var lab = [end[0] + uy * d * 1.08, end[1] + ux * d * 1.08 / cosL];
+          L.marker(lab, { pane: 'rwyPane', interactive: false, icon: L.divIcon({ className: '', iconSize: [64, 22], iconAnchor: [32, 11],
+            html: '<div style="font:800 12px Arial;color:#fff;background:#0E1116;border:2px solid #fff;border-radius:6px;padding:1px 6px;text-align:center;white-space:nowrap">RWY ' + e[2] + '</div>' }) }).addTo(rwyLayer);
+        });
+      });
+    });
+  });
+}
+map.on('zoomend', drawRunways);
+
 /* ---------- Direct to ---------- */
 var dto = recall('dto', null), dtoLine = null;
 function directTo(id, lat, lon, type) {
@@ -370,11 +427,11 @@ function directTo(id, lat, lon, type) {
   if (dto && dto.id !== id) delete dto.emer;
   dto = { id: id, lat: Number(lat), lon: Number(lon), type: type || '' }; store('dto', dto);
   $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>';
-  drawDto(); updateNext();
+  drawDto(); updateNext(); drawRunways();
   if (type === 'AIRPORT') loadFreqs(id);
   setStatus('Direct to ' + id);
 }
-function cancelDto() { dto = null; store('dto', null); $('dtoChip').style.display = 'none'; if (dtoLine) { map.removeLayer(dtoLine); dtoLine = null; } updateNext(); }
+function cancelDto() { dto = null; store('dto', null); $('dtoChip').style.display = 'none'; if (dtoLine) { map.removeLayer(dtoLine); dtoLine = null; } updateNext(); drawRunways(); }
 function drawDto() {
   if (!dto) return;
   var from = me ? [me.lat, me.lon] : null;
@@ -430,7 +487,7 @@ function fetchRoute() {
     if (r && r.points && (!route || !route.made || r.made >= route.made)) { route = r; store('route', r); drawRoute(); }
   }).catch(function () {});
 }
-drawRoute(); fetchRoute();
+drawRoute(); fetchRoute(); setTimeout(drawRunways, 300);
 if (route && route.points && !recall('view', null)) map.fitBounds(route.points.map(function (p) { return [p.lat, p.lon]; }), { padding: [30, 30] });
 
 // ---------- ownship ----------
@@ -678,7 +735,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v16') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v17') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
