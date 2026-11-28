@@ -409,10 +409,15 @@ function drawRunways() {
           var dx = (end[1] - other[1]) * cosL, dy = end[0] - other[0], len = Math.sqrt(dx * dx + dy * dy) || 1;
           var ux = dx / len, uy = dy / len, d = ext / 60;
           var out = [end[0] + uy * d, end[1] + ux * d / cosL];
-          L.polyline([end, out], { pane: 'rwyPane', color: '#FFFFFF', weight: 2.5, dashArray: '8 6', opacity: 0.95, interactive: false }).addTo(rwyLayer);
+          // bright cyan centerline on a black outline: stands out on charts, satellite and streets
+          L.polyline([end, out], { pane: 'rwyPane', color: '#000', weight: 7, opacity: 0.85, interactive: false }).addTo(rwyLayer);
+          L.polyline([end, out], { pane: 'rwyPane', color: '#00E5FF', weight: 4, dashArray: '12 7', opacity: 1, interactive: false }).addTo(rwyLayer);
+          [0.33, 0.66].forEach(function (f) {   // tick marks along the centerline
+            var c = [end[0] + uy * d * f, end[1] + ux * d * f / cosL], px = -ux * 0.0025, py = uy * 0.0025;
+            L.polyline([[c[0] + px, c[1] + py / cosL], [c[0] - px, c[1] - py / cosL]], { pane: 'rwyPane', color: '#00E5FF', weight: 4, interactive: false }).addTo(rwyLayer); });
           var lab = [end[0] + uy * d * 1.08, end[1] + ux * d * 1.08 / cosL];
           L.marker(lab, { pane: 'rwyPane', interactive: false, icon: L.divIcon({ className: '', iconSize: [64, 22], iconAnchor: [32, 11],
-            html: '<div style="font:800 12px Arial;color:#fff;background:#0E1116;border:2px solid #fff;border-radius:6px;padding:1px 6px;text-align:center;white-space:nowrap">RWY ' + e[2] + '</div>' }) }).addTo(rwyLayer);
+            html: '<div style="font:900 13px Arial;color:#000;background:#00E5FF;border:2px solid #000;border-radius:6px;padding:1px 6px;text-align:center;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.6)">RWY ' + e[2] + '</div>' }) }).addTo(rwyLayer);
         });
       });
     });
@@ -735,7 +740,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v17') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v18') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
