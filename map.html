@@ -82,6 +82,8 @@
   <button onclick="saveRoute()">Save charts for my route</button>
   <button onclick="saveAround()">Save 60 nm around me</button>
   <button class="sec" onclick="clearTiles()">Delete saved charts</button>
+  <button class="sec" onclick="checkLink()">Check connection</button>
+  <div id="linkOut" style="font-size:12px;color:#333;margin-top:8px;word-break:break-all"></div>
   <button class="sec" onclick="hidePanel()">Close</button>
 </div>
 <div id="em" style="position:absolute;inset:0;z-index:1500;background:rgba(14,17,22,.97);color:#E9ECF1;display:none;overflow:auto;padding:calc(14px + env(safe-area-inset-top)) 14px 90px">
@@ -676,7 +678,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v15') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v16') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
@@ -705,6 +707,22 @@ function saveRoute() { saveRouteFreqs(); var pts = routeSamples(); if (!pts.leng
 function saveAround() { if (!me) { $('pMsg').textContent = 'Waiting for GPS.'; return; } saveTiles(tilesAround([[me.lat, me.lon]], 60, 8, 11).concat(aeroUrlsAround([[me.lat, me.lon]], 60)), 'Area around you'); }
 function clearTiles() { caches.delete(TILE_CACHE).then(function () { estimate('Saved charts deleted. '); }); }
 function estimate(prefix) { if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { $('pMsg').textContent = (prefix || '') + 'Using about ' + Math.round(e.usage / 1048576) + ' MB on this phone.'; }); }
+// shows which public link the map is using and what it answers, to compare with Deploy > Manage deployments
+function checkLink() {
+  var o = $('linkOut');
+  if (!API) { o.innerHTML = '<b>No public link saved on this phone.</b> Open the map from the app (Map tab > Open moving map) so it gets the link.'; return; }
+  var dep = (API.match(/\/s\/([^\/]+)\/exec/) || [])[1] || '?';
+  o.innerHTML = 'Using deployment ID ending in <b>…' + dep.slice(-8) + '</b>. Checking…';
+  fetch(API + '?api=freqs&t=' + TOKEN + '&id=KCRW').then(function (r) { return r.json(); }).then(function (d) {
+    var res = d.list ? '<b style="color:#1a7f37">Frequencies OK</b> (' + d.list.length + ' for KCRW).' : '<b style="color:#c00">Answer: ' + (d.error || JSON.stringify(d).slice(0, 80)) + '</b>';
+    return fetch(API + '?api=metars&t=' + TOKEN + '&bbox=-82,38,-80,39.5').then(function (r) { return r.json(); }).then(function (m2) {
+      var res2 = m2.list ? '<b style="color:#1a7f37">Weather colors OK</b> (' + m2.list.length + ' airports).' : '<b style="color:#c00">Weather colors: ' + (m2.error || 'no answer') + '</b>';
+      o.innerHTML = 'Using deployment ID ending in <b>…' + dep.slice(-8) + '</b><br>' + res + '<br>' + res2 +
+        (d.error === 'unknown request' || m2.error === 'unknown request' ? '<br>This deployment is running older code. In Apps Script: Deploy > Manage deployments, find the deployment whose ID ends in …' + dep.slice(-8) + ', pencil, Version: New version, Deploy.' : '') +
+        (d.error === 'not authorized' ? '<br>The key does not match: open the map from the app (Map tab > Open moving map) once.' : '');
+    });
+  }).catch(function (e) { o.innerHTML = 'Using deployment ID ending in <b>…' + dep.slice(-8) + '</b><br><b style="color:#c00">Could not reach it: ' + e.message + '</b>'; });
+}
 function showPanel() { $('panel').style.display = 'block'; estimate(); }
 function hidePanel() { $('panel').style.display = 'none'; }
 </script>
