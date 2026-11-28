@@ -28,7 +28,7 @@
   .glabel{font:700 12px Arial;color:#30D158;text-shadow:0 0 3px #000,0 0 3px #000;white-space:nowrap}
   #map{position:absolute;inset:0;bottom:64px}
   #bar{position:absolute;left:0;right:0;bottom:0;height:64px;background:#0E1116;border-top:1px solid #2B3240;color:#fff;display:flex;align-items:center;justify-content:space-around;padding-bottom:env(safe-area-inset-bottom)}
-  .cell{text-align:center;min-width:56px}.cell b{display:block;font-size:19px}.cell span{font-size:10px;opacity:.75;letter-spacing:.5px}
+  .cell{text-align:center;min-width:46px}.cell b{display:block;font-size:17px}.cell span{font-size:10px;opacity:.75;letter-spacing:.5px}
   #btns{position:absolute;right:10px;top:calc(10px + env(safe-area-inset-top));display:flex;flex-direction:column;gap:8px;z-index:1000}
   #btns button{border:1px solid #3A4352;border-radius:10px;padding:8px 10px;font-weight:700;font-size:12px;background:rgba(26,31,40,.95);color:#E9ECF1;box-shadow:0 1px 6px rgba(0,0,0,.5)}
   #btns button.on{background:#2F8CFF;border-color:#5AA5FF;color:#fff}
@@ -102,6 +102,7 @@
   <div class="cell"><b id="vWp">----</b><span id="vWpLbl">NEXT</span></div>
   <div class="cell"><b id="vDist">--</b><span>NM</span></div>
   <div class="cell"><b id="vEte">--</b><span>ETE</span></div>
+  <div class="cell"><b id="vEta">--</b><span id="vEtaLbl">ETA</span></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -484,6 +485,9 @@ function onFix(pos) {
   $('vAlt').textContent = me.alt == null ? '----' : Math.round(me.alt / 10) * 10;
   updateNext(); setStatus();
 }
+// time to go: seconds under a minute, minutes under an hour, then h:mm
+function fmtEte(min) { if (min == null || !isFinite(min)) return '--'; if (min < 1) return Math.max(0, Math.round(min * 60)) + 's'; if (min < 60) return Math.round(min) + 'm'; return Math.floor(min / 60) + ':' + ('0' + Math.round(min % 60)).slice(-2); }
+function fmtEta(min) { if (min == null || !isFinite(min)) return '--'; return new Date(Date.now() + min * 60000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?(AM|PM)/i, function (x) { return x.trim().toLowerCase().charAt(0); }); }
 function updateNext() {
   if (dto && me) {
     var hereD = [me.lat, me.lon], dd = nmBetween(hereD, [dto.lat, dto.lon]);
@@ -491,7 +495,8 @@ function updateNext() {
     $('vWp').textContent = dto.id; $('vWpLbl').textContent = 'D→ ' + ('00' + Math.round(brg(hereD, [dto.lat, dto.lon]))).slice(-3) + '°';
     $('vDist').textContent = dd < 10 ? dd.toFixed(1) : Math.round(dd);
     var et = me.gs > 20 ? dd / me.gs * 60 : null;
-    $('vEte').textContent = et == null ? '--' : (et >= 60 ? Math.floor(et / 60) + ':' + ('0' + Math.round(et % 60)).slice(-2) : Math.round(et) + 'm');
+    $('vEte').textContent = fmtEte(et);
+    $('vEta').textContent = fmtEta(et); $('vEtaLbl').textContent = 'ETA ' + dto.id;
     return;
   }
   if (!me || !route || !route.points || route.points.length < 2) return;
@@ -503,7 +508,11 @@ function updateNext() {
   $('vWp').textContent = nx.id; $('vWpLbl').textContent = 'NEXT ' + ('00' + Math.round(brg(here, P[best]))).slice(-3) + '°';
   $('vDist').textContent = dist < 10 ? dist.toFixed(1) : Math.round(dist);
   var ete = me.gs > 20 ? dist / me.gs * 60 : null;
-  $('vEte').textContent = ete == null ? '--' : (ete >= 60 ? Math.floor(ete / 60) + ':' + ('0' + Math.round(ete % 60)).slice(-2) : Math.round(ete) + 'm');
+  $('vEte').textContent = fmtEte(ete);
+  // ETA at the destination (local time): this leg plus the rest of the route at the current groundspeed
+  var rest = dist; for (var k = best + 1; k < P.length; k++) rest += nmBetween(P[k - 1], P[k]);
+  var last = route.points[route.points.length - 1];
+  $('vEta').textContent = me.gs > 20 ? fmtEta(rest / me.gs * 60) : '--'; $('vEtaLbl').textContent = 'ETA ' + last.id;
 }
 if (navigator.geolocation) navigator.geolocation.watchPosition(onFix, function (e) { setStatus('GPS: ' + e.message); }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
 function toggleFollow() { follow = !follow; $('bFollow').classList.toggle('on', follow); if (follow && me) map.panTo([me.lat, me.lon]); }
@@ -667,7 +676,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v14') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v15') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });
