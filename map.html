@@ -13,9 +13,9 @@
   .leaflet-container{background:#16202E}
   .stlabel{font:700 12px Arial;color:#9FB3C8;text-shadow:0 0 3px #000;white-space:nowrap;letter-spacing:1px;text-transform:uppercase}
   .wpl{font:700 12px Arial;color:#fff;background:rgba(14,17,22,.88);border:1.5px solid #C000C0;border-radius:7px;padding:2px 6px;white-space:nowrap;display:inline-block}
-  .wpl.start{border-color:#30D158}.wpl.end{border-color:#FF453A}
+  .wpl.start{border-color:#FFFFFF}.wpl.end{border-color:#FF9F0A}
   .wpdot{width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid #C000C0;box-sizing:border-box;box-shadow:0 0 3px #000}
-  .wpdot.start{border-color:#30D158;background:#30D158}.wpdot.end{border-color:#FF453A;background:#FF453A}
+  .wpdot.start{border-color:#FFFFFF;background:#111}.wpdot.end{border-color:#FF9F0A;background:#FF9F0A}
   .wpdot.edit{width:24px;height:24px;border-width:4px}
   .mid{width:22px;height:22px;border-radius:50%;background:rgba(192,0,192,.85);color:#fff;font:700 16px/20px Arial;text-align:center;border:2px solid #fff;box-sizing:border-box}
   #editbar{position:absolute;left:10px;right:10px;bottom:74px;z-index:1001;background:rgba(20,25,34,.96);border:1px solid #C000C0;border-radius:14px;padding:10px 12px;display:none;color:#E9ECF1;font-size:13px}
@@ -67,6 +67,8 @@
       <button id="bmSatellite" onclick="setBase('Satellite')">Satellite</button>
       <button id="bmStreets" onclick="setBase('Streets')">Streets</button>
       <button id="bmAero" onclick="toggleAero()">Aero overlay</button>
+      <button id="bmFix" onclick="toggleFixes()">Fixes</button>
+      <button id="bmWx" onclick="toggleWxCat()">Weather colors</button>
     </div>
     <button id="bGlide" onclick="toggleGlide()">Glide</button>
     <button onclick="showPanel()">Offline</button>
@@ -89,6 +91,7 @@
     <div style="background:rgba(255,69,58,.15);border-radius:12px;padding:8px"><b style="font-size:24px;color:#FF6B61;display:block">7700</b><small>SQUAWK</small></div>
     <div style="background:rgba(48,209,88,.15);border-radius:12px;padding:8px"><b id="emGlide" style="font-size:24px;color:#30D158;display:block">—</b><small>GLIDE NM</small></div>
   </div>
+  <div id="emNear"></div>
   <div id="emList"></div>
   <div style="font-size:11px;color:#97A0AF;margin-top:10px">Verify every item against your POH Section 3. Edit them on the Checklists tab of your sheet.</div>
 </div>
@@ -168,6 +171,8 @@ function showStreets() {   // tiles when online, the saved vector map when offli
 }
 function toggleBaseMenu() { var s = $('baseMenu').style; s.display = s.display === 'flex' ? 'none' : 'flex'; markBase(); }
 function markBase() { ['Chart', 'Satellite', 'Streets'].forEach(function (n) { $('bm' + n).classList.toggle('on', n === baseName); $('bm' + n).style.opacity = (n === 'Satellite' && !navigator.onLine) ? 0.4 : 1; });
+  if ($('bmFix')) { $('bmFix').classList.toggle('on', fixesOn); $('bmFix').textContent = 'Fixes: ' + (fixesOn ? 'On' : 'Off'); }
+  if ($('bmWx')) { $('bmWx').classList.toggle('on', wxCatOn); $('bmWx').textContent = 'Weather colors: ' + (wxCatOn ? 'On' : 'Off'); }
   if ($('bmAero')) { $('bmAero').classList.toggle('on', aeroOn); $('bmAero').textContent = 'Aero overlay: ' + (aeroOn ? 'On' : 'Off'); $('bmAero').style.opacity = baseName === 'Chart' ? 0.4 : 1; } }
 function setBase(next) {
   if (next === 'Satellite' && !navigator.onLine) { setStatus('Satellite needs internet. Streets and Sectional work offline.'); return; }
@@ -211,7 +216,7 @@ function refreshAero() {
   aeroLayer.addTo(map);
   var z = map.getZoom(), b = map.getBounds(), pend = 0;
   Object.keys(AERO_Q).forEach(function (k) {
-    var q = AERO_Q[k]; if (z < q.minZ) return;
+    var q = AERO_Q[k]; if (z < q.minZ || (k === 'fix' && !fixesOn)) return;
     for (var la = Math.floor(b.getSouth()); la <= Math.floor(b.getNorth()); la++) for (var lo = Math.floor(b.getWest()); lo <= Math.floor(b.getEast()); lo++) {
       var key = k + la + '_' + lo; if (aeroCells[key]) continue; aeroCells[key] = 'loading'; pend++;
       (function (k, key, la, lo) {
@@ -259,7 +264,7 @@ function drawAero() {
 .addTo(aeroLayer); bindPoint(aeroLayer.getLayers()[aeroLayer.getLayers().length - 1], id, c[1], c[0], 'AIRPORT', p.NAME + '<br>Elevation ' + p.ELEVATION + ' ft' + (p.IAPEXISTS ? ', instrument approaches' : ''));
     L.marker([c[1], c[0]], { pane: 'aeroPane', interactive: false, icon: L.divIcon({ className: 'alab apt', html: id, iconAnchor: [-8, 6] }) }).addTo(aeroLayer);
   });
-  if (z >= 9) Object.values(aeroData.fix).forEach(function (f) {
+  if (z >= 9 && fixesOn) Object.values(aeroData.fix).forEach(function (f) {
     var c = f.geometry && f.geometry.coordinates; if (!c || !vb.contains([c[1], c[0]])) return; var p = f.properties;
     // GPS fix: large, filled, outlined triangle that stands out on charts, satellite and streets (bigger tap target too)
     var fs = z >= 11 ? 18 : z >= 10 ? 16 : 13;
@@ -359,6 +364,7 @@ function loadFreqs(id) {
 var dto = recall('dto', null), dtoLine = null;
 function directTo(id, lat, lon, type) {
   map.closePopup();
+  if (dto && dto.id !== id) delete dto.emer;
   dto = { id: id, lat: Number(lat), lon: Number(lon), type: type || '' }; store('dto', dto);
   $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>';
   drawDto(); updateNext();
@@ -559,7 +565,34 @@ var EM_DEFAULT = [
 var emLists = recall('checklists', null) || EM_DEFAULT;
 function fetchChecklists() { if (!API || !TOKEN || !navigator.onLine) return; fetch(API + '?api=checklists&t=' + TOKEN).then(function (r) { return r.json(); }).then(function (c) { if (Array.isArray(c) && c.length) { emLists = c; store('checklists', c); } }).catch(function () {}); }
 fetchChecklists();
-function showEm() { $('em').style.display = 'block'; $('emGlide').textContent = glideCircle ? (glideCircle.getRadius() / 1852).toFixed(1) : '—'; emMenu(); }
+var usApts = null;
+function loadUsApts(then) { if (usApts) { then(); return; } fetch('us-airports.json').then(function (r) { return r.json(); }).then(function (a) { usApts = a; then(); }).catch(function () { then(); }); }
+function nearestApts(n) {
+  if (!usApts || !me) return [];
+  return usApts.map(function (a) { return { id: a[0], lat: a[1], lon: a[2], name: a[3], len: a[4], paved: a[5], elev: a[6], d: nmBetween([me.lat, me.lon], [a[1], a[2]]) }; })
+    .sort(function (x, y) { return x.d - y.d; }).slice(0, n);
+}
+function emNearestHtml() {
+  if (!me) return '<div style="background:#1A1F28;border-radius:12px;padding:12px;margin-bottom:10px">Waiting for GPS to find the nearest airport…</div>';
+  var list = nearestApts(6); if (!list.length) return '';
+  var glide = glideCircle ? glideCircle.getRadius() / 1852 : null;
+  var row = function (a, first) {
+    var b = ('00' + Math.round(brg([me.lat, me.lon], [a.lat, a.lon]))).slice(-3), reach = glide == null ? '' : a.d <= glide ? '<span style="color:#30D158;font-weight:800">within glide</span>' : '<span style="color:#FF9F0A">beyond glide</span>';
+    return '<div onclick="directTo(\'' + a.id + '\',' + a.lat + ',' + a.lon + ',\'AIRPORT\');showEm()" style="cursor:pointer;background:' + (first ? 'rgba(212,160,0,.2)' : '#1A1F28') + ';border:1px solid ' + (first ? '#FFD60A' : '#2B3240') + ';border-radius:12px;padding:10px 12px;margin:6px 0">' +
+      '<div style="display:flex;justify-content:space-between"><b style="font-size:18px">' + (first ? '→ ' : '') + a.id + '</b><b style="font-size:18px">' + a.d.toFixed(1) + ' nm · ' + b + '°</b></div>' +
+      '<div style="font-size:12px;color:#C5CDD8">' + a.name + ' · ' + a.len.toLocaleString() + ' ft ' + (a.paved ? 'paved' : 'turf/gravel') + ' · elev ' + a.elev + ' ' + reach + '</div></div>';
+  };
+  return '<div style="font-size:12px;color:#97A0AF;letter-spacing:1px;margin-bottom:2px">NEAREST AIRPORTS (tap to go direct)</div>' + list.map(function (a, i) { return row(a, dto && dto.id === a.id); }).join('');
+}
+function showEm() {
+  $('em').style.display = 'block';
+  loadUsApts(function () {
+    // first open: go direct to the nearest airport with at least 2,000 ft of runway
+    if (me && (!dto || !dto.emer)) { var best = nearestApts(10).filter(function (a) { return a.len >= 2000; })[0] || nearestApts(1)[0];
+      if (best) { directTo(best.id, best.lat, best.lon, 'AIRPORT'); dto.emer = true; store('dto', dto); } }
+    if ($('emNear')) $('emNear').innerHTML = emNearestHtml();
+  });
+  if ($('emNear')) $('emNear').innerHTML = emNearestHtml(); $('emGlide').textContent = glideCircle ? (glideCircle.getRadius() / 1852).toFixed(1) : '—'; emMenu(); }
 function hideEm() { $('em').style.display = 'none'; }
 function emMenu() { $('emList').innerHTML = emLists.map(function (c, i) { return '<button onclick="emShow(' + i + ')" style="display:block;width:100%;text-align:left;margin:6px 0;padding:14px;border-radius:12px;font-size:16px;font-weight:700;background:' + (i === 0 ? 'rgba(255,69,58,.15)' : '#1A1F28') + ';color:#E9ECF1;border:1px solid ' + (i === 0 ? '#FF453A' : '#2B3240') + '">' + c.t + ' ›</button>'; }).join(''); }
 function emShow(i) {
@@ -570,11 +603,37 @@ function emShow(i) {
 
 if (dto) { $('dtoChip').style.display = 'block'; $('dtoChip').innerHTML = '→ Direct to <b>' + dto.id + '</b> <span style="margin-left:8px;opacity:.8">✕ cancel</span>'; }
 
+
+// ---------- fixes on / off ----------
+var fixesOn = recall('fixesOn', true);
+function toggleFixes() { fixesOn = !fixesOn; store('fixesOn', fixesOn); markBase(); refreshAero(); }
+
+// ---------- airport weather colors: VFR green, MVFR blue, IFR red, LIFR magenta ----------
+var wxCatOn = recall('wxCat', false), wxLayer = L.layerGroup(), wxTimer = null, wxLast = 0;
+map.createPane('wxPane'); map.getPane('wxPane').style.zIndex = 430;
+var CATC = { VFR: '#30D158', MVFR: '#2F8CFF', IFR: '#FF453A', LIFR: '#E040FB' };
+function toggleWxCat() { wxCatOn = !wxCatOn; store('wxCat', wxCatOn); markBase(); refreshWxCat(true); }
+function refreshWxCat(force) {
+  if (!wxCatOn) { map.removeLayer(wxLayer); return; }
+  wxLayer.addTo(map);
+  if (!API || !TOKEN) { setStatus('Weather colors need the public link'); return; }
+  if (!navigator.onLine || map.getZoom() < 6) return;
+  if (!force && Date.now() - wxLast < 60000) return;
+  var b = map.getBounds().pad(0.1); wxLast = Date.now();
+  fetch(API + '?api=metars&t=' + TOKEN + '&bbox=' + [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].map(function (v) { return v.toFixed(1); }).join(',')).then(function (r) { return r.json(); }).then(function (d) {
+    if (!d.list) return; wxLayer.clearLayers();
+    d.list.forEach(function (s) { var c = CATC[s.cat]; if (!c) return;
+      L.circleMarker([s.lat, s.lon], { pane: 'wxPane', radius: 8, color: '#000', weight: 2, fillColor: c, fillOpacity: 0.95 }).bindPopup('<b>' + s.id + '</b> <span style="color:' + c + ';font-weight:800">' + s.cat + '</span><div style="font-size:11px;margin-top:4px">' + s.raw + '</div>').addTo(wxLayer); });
+  }).catch(function () {});
+}
+map.on('moveend', function () { clearTimeout(wxTimer); wxTimer = setTimeout(function () { refreshWxCat(true); }, 700); });
+setInterval(function () { refreshWxCat(true); }, 600000);
+
 // ---------- hide or show the extra buttons (Direct to, Emergency and Plan always stay) ----------
 var btnsHidden = recall('btnsHidden', false);
 function applyBtns() { $('optBtns').style.display = btnsHidden ? 'none' : 'flex'; $('bHide').textContent = btnsHidden ? 'More ▾' : 'Hide ▴'; }
 function toggleBtns() { btnsHidden = !btnsHidden; store('btnsHidden', btnsHidden); if (btnsHidden) $('baseMenu').style.display = 'none'; applyBtns(); }
-applyBtns();
+applyBtns(); markBase(); refreshWxCat(true);
 
 // ---------- offline chart tiles ----------
 function lon2x(lon, z) { return Math.floor((lon + 180) / 360 * Math.pow(2, z)); }
@@ -608,7 +667,7 @@ function saveTiles(urls, label) {
     function next() {
       if (i >= urls.length) return;
       var u = urls[i++];
-      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v13') : Promise.resolve(cache);
+      var target = /services6\.arcgis\.com/.test(u) ? caches.open('n2880l-aero-v1') : /us-(roads|cities)\.json/.test(u) ? caches.open('n2880l-shell-v14') : Promise.resolve(cache);
       target.then(function (c) { return c.match(u).then(function (hit) {
         if (hit && !/services6/.test(u)) return;
         return fetch(u, { mode: 'cors' }).then(function (r) { if (!r.ok) return; got++; return c.put(u, r); });

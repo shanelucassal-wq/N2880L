@@ -1,6 +1,6 @@
 /* N2880L moving map service worker: keeps the map page and saved chart tiles available offline */
-var SHELL = 'n2880l-shell-v13', TILES = 'n2880l-tiles-v1', AERO = 'n2880l-aero-v1';
-var SHELL_FILES = ['map.html', 'manifest.json', 'icon.png', 'us-states.json', 'us-cities.json',
+var SHELL = 'n2880l-shell-v14', TILES = 'n2880l-tiles-v1', AERO = 'n2880l-aero-v1';
+var SHELL_FILES = ['map.html', 'manifest.json', 'icon.png', 'us-states.json', 'us-cities.json', 'us-airports.json',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'];
 self.addEventListener('install', function (e) {
@@ -23,7 +23,7 @@ self.addEventListener('fetch', function (e) {
       .catch(function () { return caches.open(AERO).then(function (c) { return c.match(u); }); }));
     return;
   }
-  if (u.indexOf('cdnjs.cloudflare.com') >= 0 || /map\.html|manifest\.json|icon\.png|us-states\.json|us-roads\.json|us-cities\.json/.test(u)) {   // app shell: network first, saved copy offline
+  if (u.indexOf('cdnjs.cloudflare.com') >= 0 || /map\.html|manifest\.json|icon\.png|us-states\.json|us-roads\.json|us-cities\.json|us-airports\.json/.test(u)) {   // app shell: network first, saved copy offline
     e.respondWith(fetch(e.request).then(function (r) { var cp = r.clone(); caches.open(SHELL).then(function (c) { c.put(e.request, cp); }); return r; })
       .catch(function () { return caches.match(e.request, { ignoreSearch: true }); }));
   }
